@@ -9,7 +9,11 @@ class PexelsService:
         self.api_key = settings.PEXELS_API_KEY
         self.headers = {"Authorization": self.api_key} if self.api_key else {}
 
-    async def search_and_download_videos(self, query: str, limit: int = 5, output_dir: str = "D:/youtube_news/media/temp") -> List[str]:
+    async def search_and_download_videos(self, query: str, limit: int = 5, output_dir: Optional[str] = None) -> List[str]:
+        if output_dir is None:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+            output_dir = os.path.join(base_dir, "media", "temp")
+
         if not self.api_key:
             print("Pexels Service: API Key not configured. Using fallback generation.")
             return []
@@ -88,7 +92,11 @@ class PexelsService:
             
         return downloaded_paths
 
-    async def search_and_download_images(self, query: str, limit: int = 5, output_dir: str = "D:/youtube_news/media/temp") -> List[str]:
+    async def search_and_download_images(self, query: str, limit: int = 5, output_dir: Optional[str] = None) -> List[str]:
+        if output_dir is None:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+            output_dir = os.path.join(base_dir, "media", "temp")
+
         if not self.api_key:
             return []
 

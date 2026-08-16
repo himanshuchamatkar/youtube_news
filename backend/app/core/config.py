@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     # API Keys
     GEMINI_API_KEY: str = ""
+    GEMINI_BACKUP_API_KEY: str = ""
     YOUTUBE_CLIENT_ID: str = ""
     YOUTUBE_CLIENT_SECRET: str = ""
     YOUTUBE_REFRESH_TOKEN: str = ""

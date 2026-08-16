@@ -28,29 +28,37 @@ class ScriptOutput(BaseModel):
 class GeminiService:
     def __init__(self):
         self.default_key = settings.GEMINI_API_KEY
+        self.backup_key = settings.GEMINI_BACKUP_API_KEY
         self.model_name = "gemini-3.6-flash"
 
-    def get_api_key(self) -> str:
-        # Dynamically fetch the API key from database settings table
+    def get_db_key(self) -> Optional[str]:
         try:
             supabase = get_supabase_client()
             res = supabase.table("settings").select("value").eq("key", "gemini_api_key").execute()
             if res.data:
                 encrypted_key = res.data[0]["value"]
-                # Decrypt the key
                 decrypted_key = settings.decrypt(encrypted_key)
                 if decrypted_key:
                     return decrypted_key
         except Exception as e:
             print(f"GeminiService: Failed to fetch key from DB settings: {e}")
-        
-        return self.default_key
+        return None
+
+    def get_keys(self) -> List[str]:
+        keys = []
+        db_key = self.get_db_key()
+        if db_key:
+            keys.append(db_key)
+        if self.default_key and self.default_key not in keys:
+            keys.append(self.default_key)
+        if self.backup_key and self.backup_key not in keys:
+            keys.append(self.backup_key)
+        return keys
 
     def test_key(self, api_key: str) -> bool:
         try:
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(self.model_name)
-            # A simple quick prompt to verify the key
             response = model.generate_content("Hello. Reply with 'OK'.")
             return "OK" in response.text or len(response.text) > 0
         except Exception as e:
@@ -58,67 +66,82 @@ class GeminiService:
             return False
 
     def evaluate_article(self, article: dict) -> NewsEvaluation:
-        api_key = self.get_api_key()
-        if not api_key:
-            raise ValueError("Gemini API key is not configured.")
+        keys = self.get_keys()
+        if not keys:
+            raise ValueError("No Gemini API keys are configured.")
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            self.model_name,
-            generation_config={"response_mime_type": "application/json", "response_schema": NewsEvaluation}
-        )
+        last_err = None
+        for key in keys:
+            try:
+                genai.configure(api_key=key)
+                model = genai.GenerativeModel(
+                    self.model_name,
+                    generation_config={"response_mime_type": "application/json", "response_schema": NewsEvaluation}
+                )
 
-        prompt = f"""
-        Analyze the following article for selection in a daily Indian Stock Market video.
+                prompt = f"""
+                Analyze the following article for selection in a daily Indian Stock Market video.
+                
+                Article Details:
+                Title: {article.get('title')}
+                Description: {article.get('description')}
+                Source: {article.get('source')}
+                Content: {article.get('raw_content')}
+                
+                Strict Rules:
+                1. Reject (selected=false) if the topic is NOT directly about the Indian stock/financial market.
+                2. Reject if the news is about USA, Forex (unless direct Rupee impact), Crypto (Bitcoin), Sports, Bollywood, or International politics with no direct Indian market impact.
+                3. Double check that numbers, company names, and dates are realistic.
+                """
+
+                response = model.generate_content(prompt)
+                data = json.loads(response.text)
+                return NewsEvaluation(**data)
+            except Exception as e:
+                print(f"GeminiService: Key failed or rate limited during evaluate: {e}. Trying backup key...")
+                last_err = e
         
-        Article Details:
-        Title: {article.get('title')}
-        Description: {article.get('description')}
-        Source: {article.get('source')}
-        Content: {article.get('raw_content')}
-        
-        Strict Rules:
-        1. Reject (selected=false) if the topic is NOT directly about the Indian stock/financial market.
-        2. Reject if the news is about USA, Forex (unless direct Rupee impact), Crypto (Bitcoin), Sports, Bollywood, or International politics with no direct Indian market impact.
-        3. Double check that numbers, company names, and dates are realistic.
-        """
-
-        response = model.generate_content(prompt)
-        data = json.loads(response.text)
-        return NewsEvaluation(**data)
+        raise last_err
 
     def generate_script(self, article: dict) -> ScriptOutput:
-        api_key = self.get_api_key()
-        if not api_key:
-            raise ValueError("Gemini API key is not configured.")
+        keys = self.get_keys()
+        if not keys:
+            raise ValueError("No Gemini API keys are configured.")
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            self.model_name,
-            generation_config={"response_mime_type": "application/json", "response_schema": ScriptOutput}
-        )
+        last_err = None
+        for key in keys:
+            try:
+                genai.configure(api_key=key)
+                model = genai.GenerativeModel(
+                    self.model_name,
+                    generation_config={"response_mime_type": "application/json", "response_schema": ScriptOutput}
+                )
 
-        prompt = f"""
-        You are the lead content writer for a professional Indian financial news channel.
-        Create a 30-60 second YouTube Shorts script based ONLY on the supplied source news article below.
-        
-        Source News Article:
-        Title: {article.get('title')}
-        Description: {article.get('description')}
-        Source URL: {article.get('url')}
-        Content: {article.get('raw_content')}
+                prompt = f"""
+                You are the lead content writer for a professional Indian financial news channel.
+                Create a 30-60 second YouTube Shorts script based ONLY on the supplied source news article below.
+                
+                Source News Article:
+                Title: {article.get('title')}
+                Description: {article.get('description')}
+                Source URL: {article.get('url')}
+                Content: {article.get('raw_content')}
 
-        Strict Writing Rules:
-        1. Use ONLY the supplied source information. Do NOT invent prices, dates, percentages, company statements, market movements, or statistics.
-        2. Keep the script length between 120 and 150 words (perfect for 40-55 seconds narration).
-        3. Use a clear Hook -> What happened -> Why it matters -> Market/Stock impact -> What to watch structure.
-        4. NEVER give direct investment advice (e.g. do NOT say 'Buy this stock' or 'Sell now'). Use phrases like 'could affect', 'investors are watching', 'potential impact'.
-        5. Provide source urls and a professional disclaimer.
-        """
+                Strict Writing Rules:
+                1. Use ONLY the supplied source information. Do NOT invent prices, dates, percentages, company statements, market movements, or statistics.
+                2. Keep the script length between 120 and 150 words (perfect for 40-55 seconds narration).
+                3. Use a clear Hook -> What happened -> Why it matters -> Market/Stock impact -> What to watch structure.
+                4. NEVER give direct investment advice (e.g. do NOT say 'Buy this stock' or 'Sell now'). Use phrases like 'could affect', 'investors are watching', 'potential impact'.
+                5. Provide source urls and a professional disclaimer.
+                """
 
-        response = model.generate_content(prompt)
-        data = json.loads(response.text)
-        # Ensure source url is included
-        if not data.get("source_urls"):
-            data["source_urls"] = [article.get("url")]
-        return ScriptOutput(**data)
+                response = model.generate_content(prompt)
+                data = json.loads(response.text)
+                if not data.get("source_urls"):
+                    data["source_urls"] = [article.get("url")]
+                return ScriptOutput(**data)
+            except Exception as e:
+                print(f"GeminiService: Key failed or rate limited during script generation: {e}. Trying backup key...")
+                last_err = e
+                
+        raise last_err

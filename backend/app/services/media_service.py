@@ -115,7 +115,7 @@ class MediaService:
         
         # Calculate how many 5-second clips we need
         clips_needed = int(duration // 5.0) + 2
-        visuals = await self.pexels.search_and_download_videos(search_query, limit=clips_needed)
+        visuals = await self.pexels.search_and_download_videos(search_query, limit=clips_needed, output_dir=self.temp_dir)
         
         # If no visuals downloaded, generate fallbacks
         if not visuals:
