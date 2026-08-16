@@ -43,7 +43,7 @@ class NewsEngine:
             return ""
         return re.sub(r'\s+', ' ', text).strip()
 
-    def filter_and_score(self, article: Dict[str, Any]) -> int:
+    def filter_and_score(self, article: Dict[str, Any], is_test: bool = False) -> int:
         title = article["title"].lower()
         desc = article["description"].lower() if article["description"] else ""
         combined = f"{title} {desc}"
