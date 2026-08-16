@@ -1,0 +1,53 @@
+# Environment and secrets
+.env
+.env.*
+credentials.txt
+*.json
+!package.json
+!tsconfig.json
+!composer.json
+!vercel.json
+!render.yaml
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/
+.pytest_cache/
+
+# Node files
+node_modules/
+dist/
+build/
+.eslintcache
+
+# Media files (temporary / rendered)
+media/temp/*
+media/audio/*
+media/images/*
+media/charts/*
+media/rendered/*
+!media/temp/.gitkeep
+!media/audio/.gitkeep
+!media/images/.gitkeep
+!media/charts/.gitkeep
+!media/rendered/.gitkeep
