@@ -966,25 +966,32 @@ function App() {
                       </div>
                     </div>
 
-                    {selectedJob.status === 'COMPLETED' && selectedJob.is_test && (
+                    {selectedJob.status === 'COMPLETED' && selectedJob.youtube_video_id && (
                       <div className="mt-4 border-t border-yellow-500/10 pt-4 space-y-3">
-                        <h4 className="text-xs font-bold text-finance-accent uppercase tracking-wider">Test Video Preview</h4>
+                        <h4 className="text-xs font-bold text-finance-accent uppercase tracking-wider">
+                          {selectedJob.is_test ? 'Test Video Preview (Unlisted/Private)' : 'Published Video Player'}
+                        </h4>
                         <div className="flex flex-col sm:flex-row gap-4 items-start">
-                          <video 
-                            src={`${API_BASE}/api/jobs/${selectedJob.id}/video`} 
-                            controls 
-                            className="w-full max-w-[140px] aspect-[9/16] bg-black rounded-xl border border-yellow-500/15 shadow-lg shadow-black/40"
+                          <iframe 
+                            src={`https://www.youtube.com/embed/${selectedJob.youtube_video_id}`}
+                            className="w-full max-w-[160px] aspect-[9/16] bg-black rounded-xl border border-yellow-500/15 shadow-lg shadow-black/40"
+                            allowFullScreen
+                            title="YouTube Shorts Preview"
                           />
                           <div className="space-y-3">
                             <p className="text-xs text-finance-textMuted max-w-xs leading-normal">
-                              The test video is compiled locally on the backend. You can review font scaling, captions synchronization, charts, and voice pitch in this preview.
+                              {selectedJob.is_test 
+                                ? "This test video was successfully uploaded to YouTube as Unlisted/Private. You can preview it using this player or view it directly on YouTube."
+                                : "This video has been successfully published to your public channel. You can view metrics and watch it on YouTube."
+                              }
                             </p>
                             <a 
-                              href={`${API_BASE}/api/jobs/${selectedJob.id}/video`}
-                              download={`short_${selectedJob.id}.mp4`}
+                              href={selectedJob.youtube_url}
+                              target="_blank"
+                              rel="noreferrer"
                               className="inline-flex items-center gap-2 px-4 py-2 bg-finance-accent hover:bg-yellow-500 text-finance-dark font-bold text-xs rounded-xl shadow transition-all active:scale-95"
                             >
-                              Download Video file
+                              Watch on YouTube
                             </a>
                           </div>
                         </div>

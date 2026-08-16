@@ -288,61 +288,47 @@ class JobManager:
             self.log_stage(supabase, job_id, "QUALITY_CHECK", "SUCCESS", f"Video passed quality checks. Duration: {v_duration:.2f}s | Size: {v_size/1024/1024:.2f}MB", duration=s5_dur)
 
             # --- STAGE 6: UPLOADING / LOCAL SAVE ---
-            if is_test:
-                self.update_job_progress(supabase, job_id, "COMPLETED", 100, "Completed successfully (Test Mode)")
-                self.log_stage(supabase, job_id, "UPLOADING", "SUCCESS", "Test mode: skipped YouTube upload. Video saved locally.", duration=0)
-                
-                # Save video record to database
-                local_url = f"http://localhost:8000/api/jobs/{job_id}/video"
-                supabase.table("videos").insert({
-                    "job_id": job_id,
-                    "title": script_data.title,
-                    "description": script_data.description,
-                    "youtube_video_id": None,
-                    "youtube_url": local_url,
-                    "duration": int(v_duration),
-                    "source_urls": [winner_article["url"]],
-                    "status": "test"
-                }).execute()
-                
-                total_dur = time.time() - start_time
-                self.log_stage(supabase, job_id, "COMPLETED", "SUCCESS", f"Pipeline completed in {total_dur:.2f}s. Test Video ready for preview!", duration=total_dur)
-            else:
-                self.update_job_progress(supabase, job_id, "UPLOADING", 90, "Uploading Short to YouTube")
-                s6_start = time.time()
-                
-                upload_res = self.youtube.upload_short(
-                    video_path=rendered_video_path,
-                    title=script_data.title,
-                    description=f"{script_data.description}\n\nSources:\n- {winner_article.get('source')}\n\nDisclaimer: {script_data.disclaimer}",
-                    tags=script_data.hashtags
-                )
-                
-                supabase.table("videos").insert({
-                    "job_id": job_id,
-                    "title": script_data.title,
-                    "description": script_data.description,
-                    "youtube_video_id": upload_res["video_id"],
-                    "youtube_url": upload_res["youtube_url"],
-                    "duration": int(v_duration),
-                    "source_urls": [winner_article["url"]],
-                    "status": "uploaded"
-                }).execute()
+            privacy = "unlisted" if is_test else "public"
+            title_prefix = "[TEST] " if is_test else ""
+            status_str = "test" if is_test else "uploaded"
+            
+            self.update_job_progress(supabase, job_id, "UPLOADING", 90, f"Uploading Short to YouTube ({privacy.capitalize()})")
+            s6_start = time.time()
+            
+            upload_res = self.youtube.upload_short(
+                video_path=rendered_video_path,
+                title=f"{title_prefix}{script_data.title}",
+                description=f"{script_data.description}\n\nSources:\n- {winner_article.get('source')}\n\nDisclaimer: {script_data.disclaimer}",
+                tags=script_data.hashtags,
+                privacy_status=privacy
+            )
+            
+            supabase.table("videos").insert({
+                "job_id": job_id,
+                "title": f"{title_prefix}{script_data.title}",
+                "description": script_data.description,
+                "youtube_video_id": upload_res["video_id"],
+                "youtube_url": upload_res["youtube_url"],
+                "duration": int(v_duration),
+                "source_urls": [winner_article["url"]],
+                "status": status_str
+            }).execute()
 
-                s6_dur = time.time() - s6_start
-                self.log_stage(supabase, job_id, "UPLOADING", "SUCCESS", f"Uploaded successfully to YouTube: {upload_res['youtube_url']}", duration=s6_dur)
+            s6_dur = time.time() - s6_start
+            self.log_stage(supabase, job_id, "UPLOADING", "SUCCESS", f"Uploaded successfully to YouTube ({privacy}): {upload_res['youtube_url']}", duration=s6_dur)
 
-                # Clean up rendered video only for production runs
-                if os.path.exists(rendered_video_path):
-                    try:
-                        os.remove(rendered_video_path)
-                        print("JobManager: Temporary rendered video deleted successfully.")
-                    except Exception as del_err:
-                        print(f"JobManager: Failed to delete final video file: {del_err}")
+            # Clean up rendered video post-upload
+            if os.path.exists(rendered_video_path):
+                try:
+                    os.remove(rendered_video_path)
+                    print("JobManager: Temporary rendered video deleted successfully.")
+                except Exception as del_err:
+                    print(f"JobManager: Failed to delete final video file: {del_err}")
 
-                total_dur = time.time() - start_time
-                self.update_job_progress(supabase, job_id, "COMPLETED", 100, "Completed successfully")
-                self.log_stage(supabase, job_id, "COMPLETED", "SUCCESS", f"Pipeline completed in {total_dur:.2f}s. YouTube Video published!", duration=total_dur)
+            # Complete Job
+            total_dur = time.time() - start_time
+            self.update_job_progress(supabase, job_id, "COMPLETED", 100, f"Completed successfully ({'Test Mode' if is_test else 'Production Mode'})")
+            self.log_stage(supabase, job_id, "COMPLETED", "SUCCESS", f"Pipeline completed in {total_dur:.2f}s. Video published as {privacy}!", duration=total_dur)
 
         except Exception as e:
             trace = traceback.format_exc()

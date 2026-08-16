@@ -188,6 +188,18 @@ def get_job_status(id: str, username: str = Depends(verify_token)):
         logs_res = supabase.table("job_logs").select("*").eq("job_id", id).order("timestamp", desc=False).execute()
         job["logs"] = logs_res.data
         
+        # Fetch associated video details if present
+        video_res = supabase.table("videos").select("*").eq("job_id", id).execute()
+        if video_res.data:
+            video = video_res.data[0]
+            job["youtube_url"] = video["youtube_url"]
+            job["youtube_video_id"] = video["youtube_video_id"]
+            job["video_title"] = video["title"]
+        else:
+            job["youtube_url"] = None
+            job["youtube_video_id"] = None
+            job["video_title"] = None
+            
         return job
     except Exception as e:
         if isinstance(e, HTTPException):
