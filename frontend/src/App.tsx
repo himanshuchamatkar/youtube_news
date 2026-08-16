@@ -3,7 +3,7 @@ import {
   TrendingUp, Tv, FileText, Settings, Activity, Play, 
   RefreshCw, User, Lock, LogOut, AlertCircle, 
   ExternalLink, Clock, Video, Award, Users,
-  Database, Sparkles, ArrowRight, CheckCircle2, XCircle, HelpCircle, ChevronRight
+  Database, Sparkles
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
