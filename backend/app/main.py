@@ -165,6 +165,32 @@ def download_job_video(id: str):
         )
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video file not found or still rendering.")
 
+@app.post("/api/jobs/{id}/cancel")
+def cancel_job_execution(id: str, username: str = Depends(verify_token)):
+    try:
+        supabase = get_supabase_client()
+        # 1. Update job status in database
+        supabase.table("video_jobs").update({
+            "status": "FAILED",
+            "error_message": "Cancelled by user"
+        }).eq("id", id).execute()
+        
+        # 2. Add log entry
+        supabase.table("job_logs").insert({
+            "job_id": id,
+            "stage": "COMPLETED",
+            "status": "FAILED",
+            "message": "Job cancelled and terminated by user from dashboard.",
+            "duration": 0
+        }).execute()
+        
+        # 3. Call job manager cancellation
+        job_manager.cancel_job(id)
+        
+        return {"success": True, "message": "Job cancellation request sent successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
 @app.get("/api/jobs")
 def list_jobs(limit: int = 20, username: str = Depends(verify_token)):
     try:

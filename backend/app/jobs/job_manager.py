@@ -17,6 +17,7 @@ class JobManager:
         self.gemini = GeminiService()
         self.media = MediaService()
         self.youtube = YouTubeService()
+        self.cancelled_jobs = set()
 
     def log_stage(self, supabase: Any, job_id: str, stage: str, status: str, message: str, duration: float = 0.0, error: Optional[str] = None):
         # Writes verbose logs to job_logs table
@@ -119,6 +120,12 @@ class JobManager:
         try:
             print(f"JobManager: Starting pipeline execution for Job {job_id} (Test Mode: {is_test})...")
             
+            def check_cancellation():
+                if job_id in self.cancelled_jobs:
+                    raise ValueError("Job cancelled by user")
+
+            check_cancellation()
+            
             # --- STAGE 1: FETCHING NEWS ---
             self.update_job_progress(supabase, job_id, "FETCHING_NEWS", 10, "Fetching raw news")
             self.log_stage(supabase, job_id, "FETCHING_NEWS", "INFO", "Started news ingestion from all providers.")
@@ -180,6 +187,7 @@ class JobManager:
                 self.log_stage(supabase, job_id, "COMPLETED", "WARNING", "No qualified Indian news articles found (NO_QUALIFIED_NEWS). Job skipped.")
                 return
 
+            check_cancellation()
             # --- STAGE 2: ANALYZING & SELECTING WINNER ---
             self.update_job_progress(supabase, job_id, "ANALYZING", 30, "Selecting best story via Gemini")
             self.log_stage(supabase, job_id, "ANALYZING", "INFO", "Starting Gemini evaluations on top articles.")
@@ -228,6 +236,7 @@ class JobManager:
                 duration=s2_dur
             )
 
+            check_cancellation()
             # --- STAGE 3: SCRIPT GENERATING ---
             self.update_job_progress(supabase, job_id, "SCRIPT_GENERATING", 45, "Generating Shorts script")
             s3_start = time.time()
@@ -246,6 +255,7 @@ class JobManager:
             s3_dur = time.time() - s3_start
             self.log_stage(supabase, job_id, "SCRIPT_GENERATING", "SUCCESS", f"Generated Short script. Title: '{script_data.title}'", duration=s3_dur)
 
+            check_cancellation()
             # --- STAGE 4: MEDIA GENERATING ---
             self.update_job_progress(supabase, job_id, "VISUAL_GENERATING", 60, "Generating voice, charts & rendering video")
             s4_start = time.time()
@@ -269,6 +279,7 @@ class JobManager:
             s4_dur = time.time() - s4_start
             self.log_stage(supabase, job_id, "VISUAL_GENERATING", "SUCCESS", f"Assembled 1080x1920 Short video at {rendered_video_path}", duration=s4_dur)
 
+            check_cancellation()
             # --- STAGE 5: QUALITY CHECK ---
             self.update_job_progress(supabase, job_id, "QUALITY_CHECK", 80, "Running video quality validation")
             s5_start = time.time()
@@ -287,6 +298,7 @@ class JobManager:
             s5_dur = time.time() - s5_start
             self.log_stage(supabase, job_id, "QUALITY_CHECK", "SUCCESS", f"Video passed quality checks. Duration: {v_duration:.2f}s | Size: {v_size/1024/1024:.2f}MB", duration=s5_dur)
 
+            check_cancellation()
             # --- STAGE 6: UPLOADING / LOCAL SAVE ---
             privacy = "unlisted" if is_test else "public"
             title_prefix = "[TEST] " if is_test else ""
@@ -352,3 +364,21 @@ class JobManager:
         thread.start()
         
         return job_id
+
+    def cancel_job(self, job_id: str):
+        self.cancelled_jobs.add(job_id)
+        print(f"JobManager: Job {job_id} added to cancellation list.")
+        
+        # Kill any running ffmpeg processes spawned by the backend
+        try:
+            import sys
+            import subprocess
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/IM", "ffmpeg.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["taskkill", "/F", "/IM", "ffprobe.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run(["pkill", "-f", "ffmpeg"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["pkill", "-f", "ffprobe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("JobManager: Terminated active FFmpeg/FFprobe processes.")
+        except Exception as kill_err:
+            print(f"JobManager: Failed to terminate ffmpeg processes: {kill_err}")

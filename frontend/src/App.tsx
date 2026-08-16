@@ -49,6 +49,7 @@ function App() {
 
   // Wake backend check interval / polling
   const [pollingJobId, setPollingJobId] = useState<string | null>(null);
+  const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -251,6 +252,38 @@ function App() {
       }
     } catch (err) {
       alert("Error starting pipeline job.");
+    }
+  };
+
+  const handleStopJob = async (jobId: string) => {
+    if (!window.confirm("Are you sure you want to stop this job execution? This will immediately terminate all active processes (including FFmpeg).")) {
+      return;
+    }
+    setStoppingJobId(jobId);
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${jobId}/cancel`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPollingJobId(null);
+        // Refresh job details
+        const refreshed = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (refreshed.ok) {
+          const updatedData = await refreshed.json();
+          setSelectedJob(updatedData);
+        }
+        fetchJobsHistory();
+      } else {
+        alert(data.detail || "Failed to cancel job.");
+      }
+    } catch (err) {
+      alert("Error stopping pipeline job.");
+    } finally {
+      setStoppingJobId(null);
     }
   };
 
@@ -913,7 +946,21 @@ function App() {
                           <h3 className="font-bold text-white text-base">Execution Details: {selectedJob.job_date}</h3>
                           <p className="text-xs text-finance-textMuted mt-0.5">Stage: <span className="text-white font-semibold">{selectedJob.current_stage}</span></p>
                         </div>
-                        {selectedJob.status === 'RUNNING' && (
+                        {!['COMPLETED', 'FAILED', 'SKIPPED'].includes(selectedJob.status) ? (
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1.5 text-xs text-finance-accent animate-pulse font-bold">
+                              <RefreshCw className="w-4 h-4 animate-spin text-finance-accent" />
+                              Processing
+                            </div>
+                            <button
+                              onClick={() => handleStopJob(selectedJob.id)}
+                              disabled={stoppingJobId === selectedJob.id}
+                              className="px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white font-bold text-xs rounded-lg transition-all active:scale-95 shadow-md shadow-red-950/20"
+                            >
+                              {stoppingJobId === selectedJob.id ? 'Stopping...' : 'Stop Execution'}
+                            </button>
+                          </div>
+                        ) : selectedJob.status === 'RUNNING' && (
                           <div className="flex items-center gap-1.5 text-xs text-finance-accent animate-pulse font-bold">
                             <RefreshCw className="w-4 h-4 animate-spin" />
                             Live Processing

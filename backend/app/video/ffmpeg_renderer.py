@@ -14,7 +14,7 @@ class FFmpegRenderer:
             "-of", "default=noprint_wrappers=1:nokey=1", audio_path
         ]
         try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, check=True)
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
             return float(result.stdout.strip())
         except Exception as e:
             print(f"FFmpegRenderer: Failed to get audio duration: {e}")
@@ -34,21 +34,21 @@ class FFmpegRenderer:
         
         if is_image:
             cmd = [
-                "ffmpeg", "-y", "-nostdin", "-loop", "1", "-i", input_path,
+                "ffmpeg", "-y", "-loop", "1", "-i", input_path,
                 "-t", str(duration), "-r", "30", "-pix_fmt", "yuv420p",
                 "-vf", scale_filter, "-c:v", "libx264", output_path
             ]
         else:
             # Strip audio from video and force standard format
             cmd = [
-                "ffmpeg", "-y", "-nostdin", "-ss", "0", "-i", input_path,
+                "ffmpeg", "-y", "-ss", "0", "-i", input_path,
                 "-t", str(duration), "-r", "30", "-an", "-pix_fmt", "yuv420p",
                 "-vf", scale_filter, "-c:v", "libx264", output_path
             ]
             
         try:
             print(f"FFmpegRenderer: Standardizing clip {index}: {input_path} -> {output_path}")
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, check=True)
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
             return output_path
         except Exception as e:
             print(f"FFmpegRenderer: Error standardizing clip {index}: {e}")
@@ -65,13 +65,13 @@ class FFmpegRenderer:
                 f.write(f"file '{formatted_path}'\n")
 
         cmd = [
-            "ffmpeg", "-y", "-nostdin", "-f", "concat", "-safe", "0", "-i", list_file_path,
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file_path,
             "-c", "copy", output_path
         ]
         
         try:
             print(f"FFmpegRenderer: Concatenating {len(clip_paths)} clips into {output_path}...")
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, check=True)
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
             # Remove temporary list file
             if os.path.exists(list_file_path):
                 os.remove(list_file_path)
@@ -145,7 +145,7 @@ class FFmpegRenderer:
         # Assemble full command
         # Standardize output to 1080x1920, H264, AAC audio
         cmd = [
-            "ffmpeg", "-y", "-nostdin",
+            "ffmpeg", "-y",
             *inputs,
             "-filter_complex", f"{filter_inputs} {overlay_steps}",
             "-map", "[v_final]",
@@ -161,7 +161,7 @@ class FFmpegRenderer:
         try:
             print("FFmpegRenderer: Rendering final short video...")
             # We change CWD to the directory containing the SRT file so FFmpeg can find the subtitle relative path cleanly on Windows!
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, check=True, cwd=srt_dir)
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, cwd=srt_dir)
             print(f"FFmpegRenderer: Video rendered successfully at {output_path}")
             return output_path
         except Exception as e:
