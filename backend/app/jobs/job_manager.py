@@ -131,7 +131,7 @@ class JobManager:
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                articles = loop.run_until_complete(self.news_engine.get_daily_news())
+                articles = loop.run_until_complete(self.news_engine.get_daily_news(is_test=is_test))
             finally:
                 loop.close()
                 
