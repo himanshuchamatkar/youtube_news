@@ -137,6 +137,23 @@ class JobManager:
                 
             s1_dur = time.time() - s1_start
             
+            # Fallback for Test Mode on weekends / holiday market closures
+            if not articles and is_test:
+                print("JobManager: Test Mode found 0 articles. Injecting a mock Indian Stock Market news story for end-to-end testing.")
+                articles = [{
+                    "title": "Tata Motors Profit Surges 15% as Q1 Net Profit Reaches Rs 3,200 Crore",
+                    "description": "Tata Motors reported strong quarterly earnings with its consolidated net profit jumping 15 percent to Rs 3,200 crore for the first quarter, driven by margin improvements in its JLR segment and strong passenger car sales in India. Operational revenue grew by 9.4 percent to Rs 1,02,236 crore. Brokerages maintain a buy rating.",
+                    "url": "https://www.moneycontrol.com/news/business/markets/tata-motors-q1-net-profit-jumps-15-percent-1234567.html",
+                    "source": "Moneycontrol",
+                    "provider": "rss",
+                    "published_at": datetime.now(timezone.utc).isoformat(),
+                    "company": "Tata Motors",
+                    "sector": "Automobile",
+                    "country": "India",
+                    "relevance_score": 95,
+                    "status": "raw"
+                }]
+
             # Write fetched articles to database
             for art in articles:
                 try:

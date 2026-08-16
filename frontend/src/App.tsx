@@ -489,7 +489,7 @@ function App() {
                 { title: 'Subscribers', value: channelMetrics.subscriber_count.toLocaleString(), icon: Users, color: 'text-blue-400 border-blue-500/20' },
                 { title: 'Total Views', value: channelMetrics.total_views.toLocaleString(), icon: Tv, color: 'text-finance-success border-green-500/20' },
                 { title: 'Shorts Published', value: channelMetrics.total_videos, icon: Video, color: 'text-purple-400 border-purple-500/20' },
-                { title: 'Quality Threshold', value: '70 / 100', icon: Award, color: 'text-finance-accent border-yellow-500/20' },
+                { title: 'Quality Threshold', value: `${settingsForm.minimum_news_score} / 100`, icon: Award, color: 'text-finance-accent border-yellow-500/20' },
               ].map((stat, idx) => (
                 <div key={idx} className={`glass-panel p-6 rounded-2xl border ${stat.color} flex items-center justify-between`}>
                   <div>
