@@ -1,73 +1,38 @@
 import os
-import json
-from google.cloud import texttospeech
-from backend.app.core.config import settings
+import asyncio
+import edge_tts
 
 class TTSService:
     def __init__(self):
-        self._setup_credentials()
-
-    def _setup_credentials(self):
-        # Read the Google Cloud service-account JSON from settings
-        cred_json = settings.GOOGLE_APPLICATION_CREDENTIALS if hasattr(settings, 'GOOGLE_APPLICATION_CREDENTIALS') else settings.GOOGLE_TTS_SERVICE_ACCOUNT_JSON
-        if not cred_json:
-            # Fallback check
-            cred_json = os.getenv("GOOGLE_TTS_SERVICE_ACCOUNT_JSON")
-
-        if cred_json:
-            try:
-                # Validate it's valid JSON
-                cred_dict = json.loads(cred_json)
-                temp_cred_path = "D:/youtube_news/media/temp/tts_credentials.json"
-                os.makedirs(os.path.dirname(temp_cred_path), exist_ok=True)
-                with open(temp_cred_path, "w", encoding="utf-8") as f:
-                    json.dump(cred_dict, f)
-                # Point Google library to this credentials file
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(temp_cred_path)
-                print("TTS Service: Google application credentials configured.")
-            except Exception as e:
-                print(f"TTS Service: Error writing credentials JSON: {e}")
-        else:
-            print("TTS Service: Google service account credentials are not set in environment.")
+        print("TTS Service: Initialized using Edge-TTS (Free Neural Voices).")
 
     def generate_narration(self, text: str, output_path: str, voice_name: str = "en-IN-Wavenet-C", speaking_rate: float = 1.05) -> str:
-        # Check if credential env var exists
-        if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-            # Try to double check if we can fall back or raise
-            raise ValueError("Google Cloud TTS credentials are not configured.")
-
         print(f"TTS Service: Synthesizing narration to {output_path}...")
-        client = texttospeech.TextToSpeechClient()
-        synthesis_input = texttospeech.SynthesisInput(text=text)
+        
+        # Map Google/Generic voice to Edge-TTS Indian English voices
+        # Prabhat (Male), Neerja (Female)
+        edge_voice = "en-IN-NeerjaNeural"
+        voice_lower = voice_name.lower()
+        if "wavenet-b" in voice_lower or "neural2-b" in voice_lower or "male" in voice_lower or "prabhat" in voice_lower:
+            edge_voice = "en-IN-PrabhatNeural"
 
-        # Indian English voices: en-IN-Wavenet-B (Male), en-IN-Wavenet-C (Female), en-IN-Neural2-B (Male)
-        # Default is Indian English
-        lang_code = "en-IN"
-        if voice_name.startswith("en-US"):
-            lang_code = "en-US"
+        # Calculate rate percent for edge-tts
+        rate_percent = int((speaking_rate - 1.0) * 100)
+        rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
 
-        voice = texttospeech.VoiceSelectionParams(
-            language_code=lang_code,
-            name=voice_name
-        )
-
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=speaking_rate,
-            pitch=0.0
-        )
-
-        try:
-            response = client.synthesize_speech(
-                input=synthesis_input, voice=voice, audio_config=audio_config
-            )
-            
+        async def run_synthesis():
+            communicate = edge_tts.Communicate(text, edge_voice, rate=rate_str)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            with open(output_path, "wb") as out:
-                out.write(response.audio_content)
-                
-            print(f"TTS Service: Generated audio file successfully at {output_path}")
+            await communicate.save(output_path)
+
+        # Execute async task in a separate event loop
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(run_synthesis())
+            print(f"TTS Service: Generated audio file successfully at {output_path} using voice: {edge_voice} (Rate: {rate_str})")
             return output_path
         except Exception as e:
             print(f"TTS Service: Speech synthesis failed: {e}")
             raise e
+        finally:
+            loop.close()
