@@ -28,7 +28,7 @@ class ScriptOutput(BaseModel):
 class GeminiService:
     def __init__(self):
         self.default_key = settings.GEMINI_API_KEY
-        self.model_name = "gemini-1.5-flash"
+        self.model_name = "gemini-3.5-flash"
 
     def get_api_key(self) -> str:
         # Dynamically fetch the API key from database settings table
