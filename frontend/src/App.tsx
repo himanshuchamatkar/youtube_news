@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   TrendingUp, Tv, FileText, Settings, Activity, Play, 
   RefreshCw, User, Lock, LogOut, AlertCircle, 
-  ExternalLink, Clock, Video, Award, Users
+  ExternalLink, Clock, Video, Award, Users,
+  Database, Sparkles, ArrowRight, CheckCircle2, XCircle, HelpCircle, ChevronRight
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -26,6 +27,99 @@ function App() {
   const [videoHistory, setVideoHistory] = useState<any[]>([]);
   const [jobsHistory, setJobsHistory] = useState<any[]>([]);
   const [selectedJob, setSelectedJob] = useState<any>(null);
+  const [consoleTab, setConsoleTab] = useState<'workflow' | 'logs'>('workflow');
+
+  const getStageInfo = (stageName: string) => {
+    if (!selectedJob || !selectedJob.logs) return { status: 'PENDING', duration: 0, error: null };
+    
+    const stageLogs = selectedJob.logs.filter((l: any) => l.stage === stageName);
+    if (stageLogs.length === 0) {
+      if (['COMPLETED', 'FAILED', 'SKIPPED'].includes(selectedJob.status)) {
+        return { status: 'SKIPPED', duration: 0, error: null };
+      }
+      return { status: 'PENDING', duration: 0, error: null };
+    }
+    
+    const successLog = stageLogs.find((l: any) => l.status === 'SUCCESS');
+    const failedLog = stageLogs.find((l: any) => l.status === 'FAILED');
+    const warningLog = stageLogs.find((l: any) => l.status === 'WARNING');
+    const infoLog = stageLogs.find((l: any) => l.status === 'INFO');
+    
+    if (successLog) {
+      return { status: 'SUCCESS', duration: successLog.duration, error: null };
+    }
+    if (failedLog) {
+      return { status: 'FAILED', duration: failedLog.duration, error: failedLog.error || failedLog.message };
+    }
+    if (warningLog) {
+      return { status: 'SKIPPED', duration: warningLog.duration, error: null };
+    }
+    if (infoLog) {
+      return { status: 'RUNNING', duration: 0, error: null };
+    }
+    
+    return { status: 'PENDING', duration: 0, error: null };
+  };
+
+  const renderWorkflowNode = (node: {
+    name: string;
+    description: string;
+    icon: React.ReactNode;
+    status: string;
+    duration?: number;
+    error?: string | null;
+  }) => {
+    let statusClass = "border-zinc-800/40 text-zinc-500 bg-zinc-900/10";
+    let iconBg = "bg-zinc-950 border-zinc-800/60 text-zinc-500";
+    let badgeText = "Pending";
+    let badgeClass = "text-zinc-500 bg-zinc-900/30 border-zinc-800/40";
+    
+    if (node.status === "SUCCESS") {
+      statusClass = "border-finance-success/15 bg-finance-success/[0.02] shadow-sm shadow-finance-success/2";
+      iconBg = "bg-zinc-950 border-finance-success/40 text-finance-success";
+      badgeText = "Completed";
+      badgeClass = "text-finance-success bg-finance-success/10 border-finance-success/25";
+    } else if (node.status === "RUNNING") {
+      statusClass = "border-yellow-500/25 bg-yellow-500/[0.01] animate-pulse";
+      iconBg = "bg-zinc-950 border-yellow-500/60 text-finance-accent animate-spin";
+      badgeText = "Running";
+      badgeClass = "text-finance-accent bg-yellow-500/10 border-yellow-500/25";
+    } else if (node.status === "FAILED") {
+      statusClass = "border-finance-danger/20 bg-finance-danger/[0.02] shadow-md shadow-finance-danger/5";
+      iconBg = "bg-zinc-950 border-finance-danger/40 text-finance-danger";
+      badgeText = "Failed";
+      badgeClass = "text-finance-danger bg-finance-danger/10 border-finance-danger/25";
+    } else if (node.status === "SKIPPED") {
+      statusClass = "border-zinc-700/30 bg-zinc-900/10 opacity-70";
+      iconBg = "bg-zinc-950 border-zinc-700/40 text-zinc-400";
+      badgeText = "Skipped";
+      badgeClass = "text-zinc-400 bg-zinc-800/20 border-zinc-700/25";
+    }
+    
+    return (
+      <div className="flex gap-4 items-start relative z-10">
+        <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center shrink-0 shadow-lg ${iconBg}`}>
+          {node.icon}
+        </div>
+        <div className={`flex-1 border rounded-xl p-3.5 flex justify-between items-center bg-zinc-950/40 backdrop-blur-sm transition-all duration-300 hover:border-zinc-700/30 ${statusClass}`}>
+          <div>
+            <h4 className="font-bold text-white text-xs leading-normal">{node.name}</h4>
+            <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal">{node.description}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {node.duration && node.duration > 0 ? (
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {node.duration.toFixed(1)}s
+              </span>
+            ) : null}
+            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase ${badgeClass}`}>
+              {badgeText}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
   
   // Settings Form States
   const [isTestMode, setIsTestMode] = useState(false);
@@ -982,35 +1076,126 @@ function App() {
                         </div>
                       </div>
 
-                      {/* Live Logs output terminal */}
-                      <h4 className="text-xs font-bold text-finance-text uppercase tracking-wider mb-2">Stage Diagnostics Log</h4>
-                      <div className="bg-black/80 rounded-xl p-4 font-mono text-xs overflow-y-auto h-72 border border-yellow-500/10 space-y-2.5">
-                        {selectedJob.logs && selectedJob.logs.map((log: any, idx: number) => (
-                          <div key={log.id || idx} className="border-b border-zinc-900 pb-2">
-                            <span className="text-slate-500">[{new Date(log.timestamp).toLocaleTimeString()}]</span>{' '}
-                            <span className={`font-bold ${
-                              log.status === 'SUCCESS' ? 'text-finance-success' :
-                              log.status === 'FAILED' ? 'text-finance-danger' :
-                              log.status === 'WARNING' ? 'text-finance-accent' : 'text-sky-400'
-                            }`}>
-                              [{log.stage}]
-                            </span>{' '}
-                            <span className="text-slate-200">{log.message}</span>
-                            {log.duration > 0 && (
-                              <span className="text-slate-500 text-[10px] ml-2">({log.duration.toFixed(2)}s)</span>
-                            )}
-                            {log.error && (
-                              <pre className="text-red-400 mt-2 bg-red-950/20 p-2 rounded overflow-x-auto text-[10px] leading-tight max-w-full">
-                                {log.error}
-                              </pre>
-                            )}
-                          </div>
-                        ))}
-                        {(!selectedJob.logs || selectedJob.logs.length === 0) && (
-                          <div className="text-slate-600 italic">No logs available for this job yet.</div>
-                        )}
-                        <div ref={logEndRef} />
+                      {/* Toggle tabs */}
+                      <div className="flex border-b border-zinc-800/60 mb-4">
+                        <button
+                          onClick={() => setConsoleTab('workflow')}
+                          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-[2px] ${
+                            consoleTab === 'workflow'
+                              ? 'text-finance-accent border-finance-accent'
+                              : 'text-finance-textMuted border-transparent hover:text-white'
+                          }`}
+                        >
+                          Visual Workflow
+                        </button>
+                        <button
+                          onClick={() => setConsoleTab('logs')}
+                          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-[2px] ${
+                            consoleTab === 'logs'
+                              ? 'text-finance-accent border-finance-accent'
+                              : 'text-finance-textMuted border-transparent hover:text-white'
+                          }`}
+                        >
+                          Raw Diagnostic Logs
+                        </button>
                       </div>
+
+                      {consoleTab === 'workflow' ? (
+                        <div className="flex-1 flex flex-col justify-between min-h-[380px]">
+                          <div className="space-y-4 relative pl-3 before:absolute before:left-[30px] before:top-2 before:bottom-2 before:w-[2px] before:bg-zinc-800/80 before:border-dashed before:border-zinc-700/60 overflow-y-auto max-h-[360px] pr-1">
+                            {/* Node 1: Trigger */}
+                            {renderWorkflowNode({
+                              name: "Pipeline Trigger",
+                              description: selectedJob.is_test ? "Manual Test Triggered" : "Scheduled Daily Production",
+                              icon: <Clock className="w-4 h-4" />,
+                              status: "SUCCESS",
+                              duration: 0.1
+                            })}
+                            {/* Node 2: News Scraper */}
+                            {renderWorkflowNode({
+                              name: "News Scraping",
+                              description: "Ingesting RSS feeds & business news",
+                              icon: <Database className="w-4 h-4" />,
+                              ...getStageInfo("FETCHING_NEWS")
+                            })}
+                            {/* Node 3: AI Select */}
+                            {renderWorkflowNode({
+                              name: "AI Select (Gemini)",
+                              description: "Evaluating relevance & selecting winner",
+                              icon: <Sparkles className="w-4 h-4" />,
+                              ...getStageInfo("ANALYZING")
+                            })}
+                            {/* Node 4: Script Design */}
+                            {renderWorkflowNode({
+                              name: "Script Design",
+                              description: "Structuring hooks, details & tags",
+                              icon: <FileText className="w-4 h-4" />,
+                              ...getStageInfo("SCRIPT_GENERATING")
+                            })}
+                            {/* Node 5: Video Render */}
+                            {renderWorkflowNode({
+                              name: "Video Compositing (FFmpeg)",
+                              description: "Voice synthesis, overlays & compositing",
+                              icon: <Video className="w-4 h-4" />,
+                              ...getStageInfo("VISUAL_GENERATING")
+                            })}
+                            {/* Node 6: YouTube Upload */}
+                            {renderWorkflowNode({
+                              name: "YouTube Publish",
+                              description: selectedJob.is_test ? "Upload as Private/Unlisted" : "Upload as Public Video",
+                              icon: <Tv className="w-4 h-4" />,
+                              ...getStageInfo("UPLOADING")
+                            })}
+                          </div>
+
+                          {/* Error Card for Workflow */}
+                          {(() => {
+                            const failedStage = ['FETCHING_NEWS', 'ANALYZING', 'SCRIPT_GENERATING', 'VISUAL_GENERATING', 'UPLOADING']
+                              .map(stage => ({ stage, ...getStageInfo(stage) }))
+                              .find(info => info.status === 'FAILED');
+                            if (!failedStage) return null;
+                            return (
+                              <div className="mt-3 bg-red-950/15 border border-red-500/15 rounded-xl p-3.5 space-y-1.5 shrink-0 max-h-[140px] overflow-y-auto">
+                                <div className="flex items-center gap-2 text-red-400 font-bold text-xs uppercase tracking-wider">
+                                  <AlertCircle className="w-4.5 h-4.5 text-red-400" />
+                                  Error: {failedStage.stage} Stage Failed
+                                </div>
+                                <pre className="text-red-300/80 font-mono text-[10px] whitespace-pre-wrap leading-relaxed max-w-full">
+                                  {failedStage.error}
+                                </pre>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <div className="bg-black/80 rounded-xl p-4 font-mono text-xs overflow-y-auto h-[380px] border border-yellow-500/10 space-y-2.5">
+                          {selectedJob.logs && selectedJob.logs.map((log: any, idx: number) => (
+                            <div key={log.id || idx} className="border-b border-zinc-900 pb-2">
+                              <span className="text-slate-500">[{new Date(log.timestamp).toLocaleTimeString()}]</span>{' '}
+                              <span className={`font-bold ${
+                                log.status === 'SUCCESS' ? 'text-finance-success' :
+                                log.status === 'FAILED' ? 'text-finance-danger' :
+                                log.status === 'WARNING' ? 'text-finance-accent' : 'text-sky-400'
+                              }`}>
+                                [{log.stage}]
+                              </span>{' '}
+                              <span className="text-slate-200">{log.message}</span>
+                              {log.duration > 0 && (
+                                <span className="text-slate-500 text-[10px] ml-2">({log.duration.toFixed(2)}s)</span>
+                              )}
+                              {log.error && (
+                                <pre className="text-red-400 mt-2 bg-red-950/20 p-2 rounded overflow-x-auto text-[10px] leading-tight max-w-full">
+                                  {log.error}
+                                </pre>
+                              )}
+                            </div>
+                          ))}
+                          {(!selectedJob.logs || selectedJob.logs.length === 0) && (
+                            <div className="text-slate-600 italic">No logs available for this job yet.</div>
+                          )}
+                          <div ref={logEndRef} />
+                        </div>
+                      )}
                     </div>
 
                     {selectedJob.status === 'COMPLETED' && selectedJob.youtube_video_id && (
