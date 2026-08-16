@@ -74,7 +74,7 @@ class MediaService:
         
         # 1. Synthesize Audio Narration
         script_text = script_data.get("script", "")
-        self.tts.generate_narration(script_text, job_audio_path)
+        await self.tts.generate_narration(script_text, job_audio_path)
         
         # Get exact audio duration
         duration = self.ffmpeg.get_audio_duration(job_audio_path)
