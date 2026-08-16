@@ -29,6 +29,7 @@ class GeminiService:
     def __init__(self):
         self.default_key = settings.GEMINI_API_KEY
         self.backup_key = settings.GEMINI_BACKUP_API_KEY
+        self.backup_key_2 = settings.GEMINI_BACKUP_API_KEY_2
         self.model_name = "gemini-3.6-flash"
 
     def get_db_key(self) -> Optional[str]:
@@ -53,6 +54,8 @@ class GeminiService:
             keys.append(self.default_key)
         if self.backup_key and self.backup_key not in keys:
             keys.append(self.backup_key)
+        if self.backup_key_2 and self.backup_key_2 not in keys:
+            keys.append(self.backup_key_2)
         return keys
 
     def test_key(self, api_key: str) -> bool:
