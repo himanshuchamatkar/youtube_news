@@ -100,8 +100,9 @@ class GeminiService:
             except Exception as e:
                 print(f"GeminiService: Key failed or rate limited during evaluate: {e}. Trying backup key...")
                 last_err = e
-        
-        raise last_err
+        if last_err is not None:
+            raise last_err
+        raise ValueError("No Gemini API keys are configured or succeeded.")
 
     def generate_script(self, article: dict) -> ScriptOutput:
         keys = self.get_keys()
@@ -143,5 +144,6 @@ class GeminiService:
             except Exception as e:
                 print(f"GeminiService: Key failed or rate limited during script generation: {e}. Trying backup key...")
                 last_err = e
-                
-        raise last_err
+        if last_err is not None:
+            raise last_err
+        raise ValueError("No Gemini API keys are configured or succeeded.")
