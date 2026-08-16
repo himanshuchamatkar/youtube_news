@@ -34,16 +34,16 @@ class FFmpegRenderer:
         
         if is_image:
             cmd = [
-                "ffmpeg", "-y", "-loop", "1", "-i", input_path,
+                "ffmpeg", "-y", "-nostdin", "-threads", "1", "-loop", "1", "-i", input_path,
                 "-t", str(duration), "-r", "30", "-pix_fmt", "yuv420p",
-                "-vf", scale_filter, "-c:v", "libx264", output_path
+                "-vf", scale_filter, "-c:v", "libx264", "-preset", "superfast", output_path
             ]
         else:
             # Strip audio from video and force standard format
             cmd = [
-                "ffmpeg", "-y", "-ss", "0", "-i", input_path,
+                "ffmpeg", "-y", "-nostdin", "-threads", "1", "-ss", "0", "-i", input_path,
                 "-t", str(duration), "-r", "30", "-an", "-pix_fmt", "yuv420p",
-                "-vf", scale_filter, "-c:v", "libx264", output_path
+                "-vf", scale_filter, "-c:v", "libx264", "-preset", "superfast", output_path
             ]
             
         try:
@@ -145,13 +145,14 @@ class FFmpegRenderer:
         # Assemble full command
         # Standardize output to 1080x1920, H264, AAC audio
         cmd = [
-            "ffmpeg", "-y",
+            "ffmpeg", "-y", "-nostdin", "-threads", "1",
             *inputs,
             "-filter_complex", f"{filter_inputs} {overlay_steps}",
             "-map", "[v_final]",
             "-map", "1:a",
             "-t", str(duration),
             "-c:v", "libx264",
+            "-preset", "superfast",
             "-c:a", "aac",
             "-b:a", "192k",
             "-pix_fmt", "yuv420p",

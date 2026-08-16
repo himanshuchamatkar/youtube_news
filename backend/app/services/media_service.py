@@ -113,8 +113,9 @@ class MediaService:
             
         print(f"MediaService: Fetching visuals for query: {search_query}")
         
-        # Calculate how many 5-second clips we need
-        clips_needed = int(duration // 5.0) + 2
+        # Calculate how many 15-second clips we need
+        clip_dur = 15.0
+        clips_needed = int(duration // clip_dur) + 1
         visuals = await self.pexels.search_and_download_videos(search_query, limit=clips_needed, output_dir=self.temp_dir)
         
         # If no visuals downloaded, generate fallbacks
@@ -126,7 +127,7 @@ class MediaService:
         std_clips = []
         for i, path in enumerate(visuals):
             try:
-                std_path = self.ffmpeg.standardize_clip(path, i, self.temp_dir, duration=5.0)
+                std_path = self.ffmpeg.standardize_clip(path, i, self.temp_dir, duration=clip_dur)
                 std_clips.append(std_path)
             except Exception as e:
                 print(f"MediaService: Failed to standardize clip {path}: {e}")
@@ -135,7 +136,7 @@ class MediaService:
             # Fallback if standardization failed
             fallbacks = self.get_fallback_clips(clips_needed)
             for i, path in enumerate(fallbacks):
-                std_path = self.ffmpeg.standardize_clip(path, i, self.temp_dir, duration=5.0)
+                std_path = self.ffmpeg.standardize_clip(path, i, self.temp_dir, duration=clip_dur)
                 std_clips.append(std_path)
 
         # 6. Concatenate background clips
