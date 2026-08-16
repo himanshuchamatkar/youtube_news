@@ -296,40 +296,46 @@ def get_channel_analytics():
     try:
         supabase = get_supabase_client()
         
-        # 1. Fetch channel statistics from cache
+        # 1. Sum views and count videos from our local database
+        vids_res = supabase.table("videos").select("views").execute()
+        total_views = sum(int(v.get("views", 0)) for v in vids_res.data) if vids_res.data else 0
+        total_videos = len(vids_res.data) if vids_res.data else 0
+        
+        # 2. Get subscriber count (from cache if < 10 mins old, else fetch fresh)
+        subscriber_count = 0
         cache_res = supabase.table("channel_metrics").select("*").order("captured_at", desc=True).limit(1).execute()
         
-        # If cache contains recent data, return it
+        use_cache = False
         if cache_res.data:
             cached_stat = cache_res.data[0]
-            # Calculate duration in hours
             cap_dt = datetime.fromisoformat(cached_stat["captured_at"].replace("Z", "+00:00"))
-            age_hours = (datetime.now(timezone.utc) - cap_dt).total_seconds() / 3600.0
-            if age_hours < 2.0:
-                # Return cache
-                return cached_stat
-
-        # 2. Fetch fresh stats from YouTube
-        stats = youtube_service.fetch_channel_metrics()
-        if stats.get("success", False):
-            # Cache statistics
-            supabase.table("channel_metrics").insert({
-                "subscriber_count": stats["subscriber_count"],
-                "total_views": stats["total_views"],
-                "total_likes": 0,
-                "total_comments": 0
-            }).execute()
-            
-            # Fetch total count of videos uploaded
-            vid_count = supabase.table("videos").select("id", count="exact").execute()
-            stats["total_videos"] = vid_count.count or 0
-            return stats
-            
-        # Fallback to cache if YouTube fails
-        if cache_res.data:
-            return cache_res.data[0]
-            
-        return {"subscriber_count": 0, "total_views": 0, "total_likes": 0, "total_comments": 0, "total_videos": 0}
+            age_mins = (datetime.now(timezone.utc) - cap_dt).total_seconds() / 60.0
+            if age_mins < 10.0:
+                subscriber_count = cached_stat.get("subscriber_count", 0)
+                use_cache = True
+                
+        if not use_cache:
+            stats = youtube_service.fetch_channel_metrics()
+            subscriber_count = stats.get("subscriber_count", 0)
+            # Write new cache
+            try:
+                supabase.table("channel_metrics").insert({
+                    "subscriber_count": subscriber_count,
+                    "total_views": total_views,
+                    "total_likes": 0,
+                    "total_comments": 0
+                }).execute()
+            except Exception:
+                pass
+                
+        return {
+            "subscriber_count": subscriber_count,
+            "total_views": total_views,
+            "total_videos": total_videos,
+            "total_likes": 0,
+            "total_comments": 0,
+            "success": True
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

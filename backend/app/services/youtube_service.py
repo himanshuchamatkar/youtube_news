@@ -74,42 +74,66 @@ class YouTubeService:
             raise e
 
     def fetch_channel_metrics(self) -> Dict[str, Any]:
-        # Fetches aggregate subscriber count and views for the channel
+        # Fetches aggregate subscriber count and videos by scraping public handle page
         try:
-            creds = self._get_credentials()
-            youtube = build("youtube", "v3", credentials=creds)
-            
-            # Retrieve details of the authenticated user's channel
-            # "mine=True" retrieves the channel associated with the OAuth credentials
-            request = youtube.channels().list(
-                part="statistics,snippet",
-                mine=True
-            )
-            response = request.execute()
-            
-            if not response.get("items"):
-                print("YouTube Service: No channel details returned.")
+            import httpx
+            import re
+            url = "https://www.youtube.com/@himanshuChamatkar"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            r = httpx.get(url, headers=headers)
+            if r.status_code != 200:
                 return self._get_mock_metrics()
                 
-            stats = response["items"][0]["statistics"]
-            
+            sub_match = re.search(r'"subscriberCountText":\s*\{[^}]*"(?:simpleText|label)":\s*"([^"]+)"', r.text)
+            sub_text = sub_match.group(1) if sub_match else ""
+            if not sub_text:
+                sub_matches = re.findall(r'"([0-9.,]+M?K? subscribers?)"', r.text)
+                sub_text = sub_matches[0] if sub_matches else "0"
+                
+            video_match = re.search(r'"videoCountText":\s*\{[^}]*"(?:simpleText|label)":\s*"([^"]+)"', r.text)
+            video_text = video_match.group(1) if video_match else ""
+            if not video_text:
+                video_matches = re.findall(r'"([0-9.,]+ videos?)"', r.text)
+                video_text = video_matches[0] if video_matches else "0"
+
+            sub_count = 0
+            sub_clean = sub_text.lower().replace("subscribers", "").replace("subscriber", "").strip()
+            if "m" in sub_clean:
+                sub_count = int(float(sub_clean.replace("m", "")) * 1000000)
+            elif "k" in sub_clean:
+                sub_count = int(float(sub_clean.replace("k", "")) * 1000)
+            else:
+                try:
+                    sub_count = int(sub_clean.replace(",", ""))
+                except ValueError:
+                    sub_count = 0
+                    
+            vid_count = 0
+            vid_clean = video_text.lower().replace("videos", "").replace("video", "").strip()
+            try:
+                vid_count = int(vid_clean.replace(",", ""))
+            except ValueError:
+                vid_count = 0
+                
             return {
-                "subscriber_count": int(stats.get("subscriberCount", 0)),
-                "total_views": int(stats.get("viewCount", 0)),
-                "total_videos": int(stats.get("videoCount", 0)),
-                "total_likes": 0,    # Channel-level likes are not in general channel statistics
-                "total_comments": 0, # Channel-level comments are not in general channel statistics
+                "subscriber_count": sub_count,
+                "total_views": 0, # Will be summed from database
+                "total_videos": vid_count,
+                "total_likes": 0,
+                "total_comments": 0,
                 "success": True
             }
         except Exception as e:
-            print(f"YouTube Service: Failed to fetch channel metrics: {e}. Returning mock / empty stats.")
+            print(f"YouTube Service: Scraping channel metrics failed: {e}")
             return self._get_mock_metrics()
 
     def fetch_video_metrics(self, youtube_video_id: str) -> Dict[str, Any]:
-        # Fetches views, likes, comments for a specific video
+        # Fetches views, likes, comments for a specific video using public Developer Key
         try:
-            creds = self._get_credentials()
-            youtube = build("youtube", "v3", credentials=creds)
+            api_key = settings.GEMINI_BACKUP_API_KEY_2 or settings.GEMINI_BACKUP_API_KEY or settings.GEMINI_API_KEY
+            youtube = build("youtube", "v3", developerKey=api_key)
             
             request = youtube.videos().list(
                 part="statistics",
@@ -133,7 +157,6 @@ class YouTubeService:
             return {"views": 0, "likes": 0, "comments": 0, "success": False}
 
     def _get_mock_metrics(self) -> Dict[str, Any]:
-        # Return structured mock data for fallback
         return {
             "subscriber_count": 0,
             "total_views": 0,

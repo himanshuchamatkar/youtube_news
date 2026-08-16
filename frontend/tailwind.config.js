@@ -8,13 +8,13 @@ export default {
     extend: {
       colors: {
         finance: {
-          dark: '#0a192f',
-          card: '#112240',
-          accent: '#f1c40f',
-          success: '#2ecc71',
-          danger: '#e74c3c',
-          text: '#f8f9fa',
-          textMuted: '#8892b0'
+          dark: '#f8fafc',
+          card: '#ffffff',
+          accent: '#d97706',
+          success: '#10b981',
+          danger: '#ef4444',
+          text: '#0f172a',
+          textMuted: '#64748b'
         }
       }
     },
