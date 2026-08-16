@@ -46,6 +46,10 @@ class FFmpegRenderer:
                 "-vf", scale_filter, "-c:v", "libx264", "-preset", "superfast", output_path
             ]
             
+        import sys
+        if sys.platform != "win32":
+            cmd = ["nice", "-n", "19"] + cmd
+
         try:
             print(f"FFmpegRenderer: Standardizing clip {index}: {input_path} -> {output_path}")
             subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -159,6 +163,10 @@ class FFmpegRenderer:
             output_path
         ]
         
+        import sys
+        if sys.platform != "win32":
+            cmd = ["nice", "-n", "19"] + cmd
+
         try:
             print("FFmpegRenderer: Rendering final short video...")
             # We change CWD to the directory containing the SRT file so FFmpeg can find the subtitle relative path cleanly on Windows!
