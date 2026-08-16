@@ -155,7 +155,8 @@ def trigger_daily_job(is_test: bool = False, username: str = Depends(verify_toke
 
 @app.get("/api/jobs/{id}/video")
 def download_job_video(id: str):
-    video_path = f"D:/youtube_news/media/rendered/short_{id}.mp4"
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    video_path = os.path.join(base_dir, "media", "rendered", f"short_{id}.mp4")
     if os.path.exists(video_path):
         return FileResponse(
             video_path,

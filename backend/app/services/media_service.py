@@ -17,10 +17,11 @@ class MediaService:
         self.captions = CaptionGenerator()
         self.ffmpeg = FFmpegRenderer()
         
-        self.temp_dir = "D:/youtube_news/media/temp"
-        self.audio_dir = "D:/youtube_news/media/audio"
-        self.chart_dir = "D:/youtube_news/media/charts"
-        self.rendered_dir = "D:/youtube_news/media/rendered"
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        self.temp_dir = os.path.join(base_dir, "media", "temp")
+        self.audio_dir = os.path.join(base_dir, "media", "audio")
+        self.chart_dir = os.path.join(base_dir, "media", "charts")
+        self.rendered_dir = os.path.join(base_dir, "media", "rendered")
         
         # Ensure all directories exist
         for d in [self.temp_dir, self.audio_dir, self.chart_dir, self.rendered_dir]:
