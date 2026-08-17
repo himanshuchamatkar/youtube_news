@@ -82,7 +82,7 @@ class YouTubeService:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-            r = httpx.get(url, headers=headers)
+            r = httpx.get(url, headers=headers, timeout=3.0)
             if r.status_code != 200:
                 return self._get_mock_metrics()
                 
@@ -130,31 +130,63 @@ class YouTubeService:
             return self._get_mock_metrics()
 
     def fetch_video_metrics(self, youtube_video_id: str) -> Dict[str, Any]:
-        # Fetches views, likes, comments for a specific video using public Developer Key
+        # Fetches views, likes, comments for a specific video by scraping the public watch page
         try:
-            api_key = settings.GEMINI_BACKUP_API_KEY_2 or settings.GEMINI_BACKUP_API_KEY or settings.GEMINI_API_KEY
-            youtube = build("youtube", "v3", developerKey=api_key)
-            
-            request = youtube.videos().list(
-                part="statistics",
-                id=youtube_video_id
-            )
-            response = request.execute()
-            
-            if not response.get("items"):
-                print(f"YouTube Service: Video {youtube_video_id} not found.")
+            import httpx
+            import re
+            url = f"https://www.youtube.com/watch?v={youtube_video_id}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9"
+            }
+            r = httpx.get(url, headers=headers, timeout=3.0)
+            if r.status_code != 200:
                 return {"views": 0, "likes": 0, "comments": 0, "success": False}
                 
-            stats = response["items"][0]["statistics"]
+            # Parse views
+            view_match = re.search(r'"viewCount":\s*"([0-9]+)"', r.text)
+            views = int(view_match.group(1)) if view_match else 0
+            
+            # Parse likes
+            like_match = re.search(r'"likeCountText":\s*\{[^}]*"simpleText":\s*"([^"]+)"', r.text)
+            like_text = like_match.group(1) if like_match else ""
+            if not like_text:
+                like_matches = re.findall(r'"([0-9,]+ likes?)"', r.text)
+                like_text = like_matches[0] if like_matches else "0"
+                
+            likes = 0
+            like_clean = like_text.lower().replace("likes", "").replace("like", "").replace(",", "").strip()
+            try:
+                if "k" in like_clean:
+                    likes = int(float(like_clean.replace("k", "")) * 1000)
+                elif "m" in like_clean:
+                    likes = int(float(like_clean.replace("m", "")) * 1000000)
+                else:
+                    likes = int(like_clean)
+            except ValueError:
+                likes = 0
+                
             return {
-                "views": int(stats.get("viewCount", 0)),
-                "likes": int(stats.get("likeCount", 0)),
-                "comments": int(stats.get("commentCount", 0)),
+                "views": views,
+                "likes": likes,
+                "comments": 0,
                 "success": True
             }
         except Exception as e:
-            print(f"YouTube Service: Failed to fetch video metrics for {youtube_video_id}: {e}")
+            print(f"YouTube Service: Scraping video metrics failed for {youtube_video_id}: {e}")
             return {"views": 0, "likes": 0, "comments": 0, "success": False}
+
+    def fetch_multiple_videos_metrics(self, video_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        res_dict = {}
+        for vid_id in video_ids:
+            metrics = self.fetch_video_metrics(vid_id)
+            if metrics.get("success", False):
+                res_dict[vid_id] = {
+                    "views": metrics["views"],
+                    "likes": metrics["likes"],
+                    "comments": metrics["comments"]
+                }
+        return res_dict
 
     def _get_mock_metrics(self) -> Dict[str, Any]:
         return {

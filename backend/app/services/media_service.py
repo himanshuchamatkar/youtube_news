@@ -68,7 +68,7 @@ class MediaService:
         job_srt_path = os.path.join(self.temp_dir, f"subtitles_{job_id}.srt")
         
         headline_card_path = os.path.join(self.chart_dir, f"headline_{job_id}.png")
-        chart_card_path = os.path.join(self.chart_dir, f"chart_{job_id}.png")
+        chart_card_path = os.path.join(self.chart_dir, f"chart_{job_id}.mp4")
         badge_card_path = os.path.join(self.chart_dir, f"badge_{job_id}.png")
         
         final_video_path = os.path.join(self.rendered_dir, f"short_{job_id}.mp4")

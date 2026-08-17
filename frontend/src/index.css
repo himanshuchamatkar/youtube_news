@@ -50,7 +50,7 @@ h1, h2, h3, h4, h5, h6, .text-white {
 }
 
 label {
-  color: #475569 !important;
+  color: #1e293b !important; /* slate-800 */
 }
 
 input, select, textarea {
@@ -60,7 +60,7 @@ input, select, textarea {
 }
 
 input::placeholder {
-  color: #94a3b8 !important;
+  color: #64748b !important; /* slate-500 */
 }
 
 /* Override dark utility backgrounds to clean white/light slate */
@@ -73,13 +73,60 @@ input::placeholder {
   border-color: #e2e8f0 !important;
 }
 
-/* Text overrides */
+/* High contrast text overrides for light mode readability */
 .text-slate-200, .text-slate-300, .text-slate-100, .text-zinc-200, .text-zinc-100 {
   color: #0f172a !important;
 }
 
-.text-slate-500, .text-slate-400, .text-zinc-400, .text-zinc-500, .text-finance-textMuted {
-  color: #64748b !important;
+.text-slate-500, .text-slate-400, .text-zinc-400, .text-zinc-500, .text-finance-textMuted, .text-slate-600, .text-zinc-600 {
+  color: #334155 !important; /* Slate 700 for high visibility */
+}
+
+/* Status badge styling overrides */
+.text-green-400, .text-emerald-400, .text-finance-success {
+  color: #15803d !important; /* Green 700 */
+}
+.bg-green-950\/40, .bg-green-950\/50, .bg-green-950, .bg-finance-success\/15, .bg-finance-success\/10, .bg-finance-success {
+  background-color: #f0fdf4 !important;
+  color: #15803d !important;
+  border-color: #bbf7d0 !important;
+}
+
+.text-red-400, .text-finance-danger {
+  color: #b91c1c !important; /* Red 700 */
+}
+.bg-red-950\/40, .bg-red-950\/50, .bg-red-950, .bg-finance-danger\/15, .bg-finance-danger\/10, .bg-finance-danger, .bg-red-950\/20, .bg-red-950\/30 {
+  background-color: #fef2f2 !important;
+  color: #b91c1c !important;
+  border-color: #fca5a5 !important;
+}
+
+.text-yellow-400, .text-finance-accent, .text-orange-400, .text-orange-500 {
+  color: #c2410c !important; /* Orange 700 */
+}
+.bg-yellow-950\/40, .bg-yellow-950\/50, .bg-yellow-950, .bg-finance-accent\/15, .bg-finance-accent\/10, .bg-yellow-500\/10, .bg-yellow-500\/5 {
+  background-color: #fff7ed !important;
+  color: #c2410c !important;
+  border-color: #fed7aa !important;
+}
+
+.text-zinc-400, .text-slate-400 {
+  color: #475569 !important; /* Slate 600 */
+}
+span.bg-zinc-800, span.bg-zinc-950, span.bg-zinc-950\/40, span.bg-zinc-950\/30, span.bg-zinc-800\/40, span.bg-zinc-800\/20, .bg-zinc-800\/40, .bg-zinc-800\/20, .bg-zinc-900\/40 {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Buttons like Test Key button override */
+button.bg-zinc-800, button.bg-zinc-700, .bg-zinc-800, .bg-zinc-700 {
+  background-color: #f1f5f9 !important; /* slate-100 */
+  color: #0f172a !important; /* slate-900 */
+  border: 1px solid #cbd5e1 !important;
+}
+button.bg-zinc-800:hover, button.bg-zinc-700:hover {
+  background-color: #e2e8f0 !important; /* slate-200 */
 }
 
 /* Arrow & Connector lines for Workflow */
@@ -93,5 +140,5 @@ input::placeholder {
 }
 
 .recharts-text {
-  fill: #64748b !important;
+  fill: #475569 !important;
 }

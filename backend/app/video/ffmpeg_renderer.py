@@ -98,60 +98,79 @@ class FFmpegRenderer:
         duration = self.get_audio_duration(audio_path)
         print(f"FFmpegRenderer: Assembling video. Duration = {duration}s")
         
-        # Build filter complex for overlays
-        # Inputs: 
-        # 0: bg_video
-        # 1: audio (not used in filter complex, but merged in output)
-        # 2: headline_card (always visible, x=40, y=120)
-        # 3: chart_card (optional, visible between 15-30s, x=40, y=600)
-        # 4: badge_card (optional, visible between 5-15s, x=380, y=600)
-        
-        filter_inputs = "[0:v][2:v]"
-        overlay_steps = "overlay=40:120"
-        current_out = "v1"
-        
         inputs = [
             "-i", bg_video_path,
             "-i", audio_path,
             "-i", headline_card
         ]
         
+        # Watermark logo
+        logo_path = "D:/youtube_news/logo/logo.png"
+        inputs.append("-i")
+        inputs.append(logo_path)
+        logo_input_index = 3
+        
+        # CTA Subscribe overlay (Solid overlay, scaled to full-screen and placed before subtitles)
+        cta_path = "D:/youtube_news/logo/cta_subscribe.jpg"
+        inputs.append("-i")
+        inputs.append(cta_path)
+        cta_input_index = 4
+        
         # Check optional overlays
         has_chart = os.path.exists(chart_card) if chart_card else False
         has_badge = os.path.exists(badge_card) if badge_card else False
         
-        input_index = 3
+        input_index = 5
+        chart_input_index = -1
         if has_chart:
+            # Use -itsoffset 15 to shift the chart animation timeline natively
+            inputs.append("-itsoffset")
+            inputs.append("15")
             inputs.append("-i")
             inputs.append(chart_card)
-            overlay_steps += f" [{current_out}]; [{current_out}][{input_index}:v] overlay=40:600:enable='between(t,15,30)'"
-            current_out = f"v{input_index}"
+            chart_input_index = input_index
             input_index += 1
             
+        badge_input_index = -1
         if has_badge:
             inputs.append("-i")
             inputs.append(badge_card)
-            overlay_steps += f" [{current_out}]; [{current_out}][{input_index}:v] overlay=380:600:enable='between(t,5,15)'"
-            current_out = f"v{input_index}"
+            badge_input_index = input_index
             input_index += 1
-
-        # Burn in subtitles
-        # To avoid path formatting bugs in Windows, run the command in the directory containing the SRT file,
-        # or format the path with forward slashes and escaped characters.
+            
+        # Build filter complex overlay sequence:
+        # 1. Scale logo watermark to 100x100 and overlay it top-right (x=920, y=40)
+        # 2. Overlay headline card near top (x=60, y=120)
+        filter_complex = f"[3:v] scale=100:100 [logo]; [0:v][2:v] overlay=60:120 [v1]; [v1][logo] overlay=920:40 [v2]"
+        current_out = "v2"
+        
+        # 3. Overlay the delayed animated chart video below headline (x=40, y=420) from t=15 to 30
+        if has_chart:
+            filter_complex += f"; [{current_out}][{chart_input_index}:v] overlay=40:420:enable='between(t,15,30)' [v3]"
+            current_out = "v3"
+            
+        # 4. Overlay the brand badge bottom-left (x=60, y=1450) from t=5 to 15
+        if has_badge:
+            filter_complex += f"; [{current_out}][{badge_input_index}:v] overlay=60:1450:enable='between(t,5,15)' [v4]"
+            current_out = "v4"
+            
+        # 5. Scale the solid CTA image to full-screen 1080x1920 and overlay it during the last 3 seconds
+        cta_start = max(0.0, duration - 3.0)
+        filter_complex += f"; [4:v] scale=1080:1920 [cta_scaled]"
+        filter_complex += f"; [{current_out}][cta_scaled] overlay=0:0:enable='between(t,{cta_start},{duration})' [v_cta]"
+        current_out = "v_cta"
+        
+        # 6. Burn in subtitles as the final most front layer (Arial Bold, Yellow color, Outline, elevated with MarginV=130)
         srt_rel = os.path.basename(srt_path)
         srt_dir = os.path.dirname(srt_path)
+        style = "Alignment=2,FontName=Arial,FontSize=22,Bold=1,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,MarginV=130"
+        filter_complex += f"; [{current_out}] subtitles='{srt_rel}':force_style='{style}' [v_final]"
         
-        # Append subtitle step to filter complex
-        # PrimaryColour hex format is AABBGGRR, so &H00FFFF is cyan/gold, &H00FFFFFF is white
-        style = "Alignment=2,FontSize=18,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,MarginV=180"
-        overlay_steps += f" [{current_out}]; [{current_out}] subtitles='{srt_rel}':force_style='{style}' [v_final]"
-
         # Assemble full command
-        # Standardize output to 1080x1920, H264, AAC audio
         cmd = [
             "ffmpeg", "-y", "-nostdin", "-threads", "1",
             *inputs,
-            "-filter_complex", f"{filter_inputs} {overlay_steps}",
+            "-filter_complex", filter_complex,
             "-map", "[v_final]",
             "-map", "1:a",
             "-t", str(duration),
@@ -166,11 +185,10 @@ class FFmpegRenderer:
         import sys
         if sys.platform != "win32":
             cmd = ["nice", "-n", "19"] + cmd
-
+            
         try:
             print("FFmpegRenderer: Rendering final short video...")
-            # We change CWD to the directory containing the SRT file so FFmpeg can find the subtitle relative path cleanly on Windows!
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, cwd=srt_dir)
+            subprocess.run(cmd, check=True, cwd=srt_dir)
             print(f"FFmpegRenderer: Video rendered successfully at {output_path}")
             return output_path
         except Exception as e:

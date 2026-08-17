@@ -51,3 +51,11 @@ media/rendered/*
 !media/images/.gitkeep
 !media/charts/.gitkeep
 !media/rendered/.gitkeep
+
+# Local Database
+*.db
+factory.db
+
+# Installers / Large Binaries
+*.exe
+OllamaSetup.exe

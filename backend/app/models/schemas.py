@@ -28,6 +28,12 @@ class GeminiKeyTest(BaseModel):
 class GeminiKeySave(BaseModel):
     api_key: str
 
+class GeminiKeySelectRequest(BaseModel):
+    key_id: str
+
+class GeminiKeyTestRequest(BaseModel):
+    key_value: str
+
 class LogEntry(BaseModel):
     id: str
     timestamp: datetime

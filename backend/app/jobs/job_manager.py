@@ -66,29 +66,24 @@ class JobManager:
                     return res.data[0]["id"]
                 raise ValueError("Failed to create test job row.")
 
-            # Check if there is already a completed or running production job
+            # Check if there is already a production job
             res = supabase.table("video_jobs").select("*").eq("job_date", today_date).eq("is_test", False).execute()
             if res.data:
                 existing_job = res.data[0]
-                status = existing_job["status"]
+                job_id = existing_job["id"]
                 
-                if status in ["RUNNING", "COMPLETED"]:
-                    raise ValueError(f"Today's production job already exists with status: {status}")
+                # Reset existing job to RUNNING (allows unlimited retries)
+                print(f"JobManager: Re-running production job {job_id} for date {today_date}...")
+                supabase.table("video_jobs").update({
+                    "status": "RUNNING",
+                    "progress": 0,
+                    "current_stage": "initialized",
+                    "error_message": None,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": None
+                }).eq("id", job_id).execute()
                 
-                # If job exists but was FAILED or SKIPPED, allow retry
-                if status in ["FAILED", "SKIPPED"]:
-                    job_id = existing_job["id"]
-                    # Reset existing job to RUNNING
-                    supabase.table("video_jobs").update({
-                        "status": "RUNNING",
-                        "progress": 0,
-                        "current_stage": "initialized",
-                        "error_message": None,
-                        "started_at": datetime.now(timezone.utc).isoformat(),
-                        "completed_at": None
-                    }).eq("id", job_id).execute()
-                    
-                    return job_id
+                return job_id
 
             # Insert new production job row
             res = supabase.table("video_jobs").insert({
@@ -109,7 +104,19 @@ class JobManager:
                 raise e
             # Check if unique constraint error
             if "duplicate key" in str(e) or "23505" in str(e):
-                raise ValueError("Today's production video job is already in progress or completed.")
+                # Try to load and reset again to handle race conditions
+                res = supabase.table("video_jobs").select("*").eq("job_date", today_date).eq("is_test", False).execute()
+                if res.data:
+                    job_id = res.data[0]["id"]
+                    supabase.table("video_jobs").update({
+                        "status": "RUNNING",
+                        "progress": 0,
+                        "current_stage": "initialized",
+                        "error_message": None,
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "completed_at": None
+                    }).eq("id", job_id).execute()
+                    return job_id
             raise e
 
     def run_daily_pipeline(self, job_id: str, is_test: bool = False):
@@ -214,21 +221,48 @@ class JobManager:
 
             s2_dur = time.time() - s2_start
 
+            # Fallback if Gemini failed or rate-limited
+            if not winner_article and articles:
+                print("JobManager: Gemini evaluation failed or rate-limited. Falling back to heuristic selection...")
+                winner_article = articles[0]
+                from backend.app.services.gemini_service import NewsEvaluation
+                winner_evaluation = NewsEvaluation(
+                    selected=True,
+                    score=winner_article.get("relevance_score", 85),
+                    category="INDIAN_STOCK_MARKET",
+                    reason="Heuristic fallback selection due to Gemini rate limits.",
+                    market_impact="HIGH",
+                    company=winner_article.get("company") or "Market",
+                    sector=winner_article.get("sector") or "General",
+                    needs_verification=False
+                )
+                db_art = supabase.table("news_articles").select("id").eq("url", winner_article["url"]).execute()
+                winner_article["id"] = db_art.data[0]["id"] if db_art.data else None
+
             if not winner_article:
                 self.update_job_progress(supabase, job_id, "SKIPPED", 100, "Skipped - No article selected by AI")
                 self.log_stage(supabase, job_id, "COMPLETED", "WARNING", "Gemini did not select any article as qualified. Job skipped.", duration=s2_dur)
                 return
 
             # Update winner article status in DB
-            supabase.table("news_articles").update({"status": "selected"}).eq("id", winner_article["id"]).execute()
+            if winner_article.get("id"):
+                supabase.table("news_articles").update({"status": "selected"}).eq("id", winner_article["id"]).execute()
             
-            # Insert into daily_selections
-            supabase.table("daily_selections").insert({
-                "news_article_id": winner_article["id"],
-                "score": winner_evaluation.score,
-                "selection_reason": winner_evaluation.reason,
-                "is_test": is_test
-            }).execute()
+            # Insert into daily_selections (clearing previous selection for today first)
+            if winner_article.get("id"):
+                if not is_test:
+                    today_date = date.today().isoformat()
+                    try:
+                        supabase.table("daily_selections").delete().eq("date", today_date).eq("is_test", False).execute()
+                    except Exception as del_err:
+                        print(f"JobManager: Failed to delete previous daily selection: {del_err}")
+                
+                supabase.table("daily_selections").insert({
+                    "news_article_id": winner_article["id"],
+                    "score": winner_evaluation.score,
+                    "selection_reason": winner_evaluation.reason,
+                    "is_test": is_test
+                }).execute()
 
             self.log_stage(
                 supabase, job_id, "ANALYZING", "SUCCESS", 
@@ -241,16 +275,44 @@ class JobManager:
             self.update_job_progress(supabase, job_id, "SCRIPT_GENERATING", 45, "Generating Shorts script")
             s3_start = time.time()
             
-            script_data = self.gemini.generate_script(winner_article)
+            try:
+                script_data = self.gemini.generate_script(winner_article)
+            except Exception as script_err:
+                print(f"JobManager: Failed to generate script via Gemini: {script_err}. Using template fallback.")
+                from backend.app.services.gemini_service import ScriptOutput
+                title = winner_article["title"]
+                clean_title = title.split(" | ")[0]
+                if len(clean_title) > 65:
+                    clean_title = clean_title[:62] + "..."
+                
+                desc_text = winner_article.get("description") or "Latest stock news update."
+                if len(desc_text) > 120:
+                    desc_text = desc_text[:117] + "..."
+                    
+                script_data = ScriptOutput(
+                    title=f"{clean_title} | Indian Stock Market Today",
+                    hook=f"Major update from the Indian stock market today: {clean_title}!",
+                    script=(
+                        f"Here is a critical stock market update. {clean_title}. "
+                        f"{desc_text} "
+                        "Investors are closely watching the market reaction tomorrow morning as trading begins. "
+                        "For more daily updates, like, share, and subscribe to our channel."
+                    ),
+                    description=f"Market Update: {winner_article['title']}\n\nDisclaimer: This content is for informational purposes only and is not financial advice.",
+                    hashtags=["StockMarket", "India", "FinanceNews", "NSE"],
+                    source_urls=[winner_article["url"]],
+                    disclaimer="This content is for informational purposes only and is not financial advice."
+                )
             
-            supabase.table("scripts").insert({
-                "news_article_id": winner_article["id"],
-                "script": script_data.script,
-                "title": script_data.title,
-                "description": script_data.description,
-                "hashtags": script_data.hashtags,
-                "model": self.gemini.model_name
-            }).execute()
+            if winner_article.get("id"):
+                supabase.table("scripts").insert({
+                    "news_article_id": winner_article["id"],
+                    "script": script_data.script,
+                    "title": script_data.title,
+                    "description": script_data.description,
+                    "hashtags": script_data.hashtags,
+                    "model": self.gemini.model_name
+                }).execute()
             
             s3_dur = time.time() - s3_start
             self.log_stage(supabase, job_id, "SCRIPT_GENERATING", "SUCCESS", f"Generated Short script. Title: '{script_data.title}'", duration=s3_dur)

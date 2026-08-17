@@ -6,7 +6,7 @@ import {
   Database, Sparkles
 } from 'lucide-react';
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
   ResponsiveContainer
 } from 'recharts';
 
@@ -28,6 +28,7 @@ function App() {
   const [jobsHistory, setJobsHistory] = useState<any[]>([]);
   const [selectedJob, setSelectedJob] = useState<any>(null);
   const [consoleTab, setConsoleTab] = useState<'workflow' | 'logs'>('workflow');
+  const [isRefreshingAnalytics, setIsRefreshingAnalytics] = useState(false);
 
   const getStageInfo = (stageName: string) => {
     if (!selectedJob || !selectedJob.logs) return { status: 'PENDING', duration: 0, error: null };
@@ -124,7 +125,6 @@ function App() {
   // Settings Form States
   const [isTestMode, setIsTestMode] = useState(false);
   const [newGeminiKey, setNewGeminiKey] = useState('');
-  const [geminiTestResult, setGeminiTestResult] = useState<string | null>(null);
   const [settingsUpdateMsg, setSettingsUpdateMsg] = useState<string | null>(null);
   const [settingsForm, setSettingsForm] = useState({
     daily_video_time: '11:00 AM',
@@ -137,6 +137,11 @@ function App() {
     auto_voice: true,
     default_tts_voice: 'en-IN-Wavenet-C'
   });
+  
+  // Gemini Key Rotation Manager States
+  const [geminiKeysList, setGeminiKeysList] = useState<any[]>([]);
+  const [activeKeyId, setActiveKeyId] = useState<string>('default');
+  const [keysTestingStatus, setKeysTestingStatus] = useState<Record<string, {status: string, msg: string}>>({});
   
   // News detail modal state
   const [selectedNews, setSelectedNews] = useState<any>(null);
@@ -154,8 +159,16 @@ function App() {
       fetchVideoHistory();
       fetchJobsHistory();
       fetchAppSettings();
+      fetchGeminiKeys();
     }
   }, [token]);
+
+  // Refresh keys list on Settings tab activation
+  useEffect(() => {
+    if (activeTab === 'settings' && token) {
+      fetchGeminiKeys();
+    }
+  }, [activeTab, token]);
 
   // Scroll to bottom of logs on updates
   useEffect(() => {
@@ -246,10 +259,11 @@ function App() {
     }
   };
 
-  const fetchChannelAnalytics = async () => {
+  const fetchChannelAnalytics = async (refresh = false) => {
     try {
+      if (refresh) setIsRefreshingAnalytics(true);
       // Channel metrics cache check
-      const res = await fetch(`${API_BASE}/api/analytics/channel`);
+      const res = await fetch(`${API_BASE}/api/analytics/channel?refresh=${refresh}`);
       const data = await res.json();
       setChannelMetrics(data);
 
@@ -261,6 +275,8 @@ function App() {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      if (refresh) setIsRefreshingAnalytics(false);
     }
   };
 
@@ -381,24 +397,7 @@ function App() {
     }
   };
 
-  const testGeminiKey = async () => {
-    setGeminiTestResult('Testing...');
-    try {
-      const res = await fetch(`${API_BASE}/api/settings/gemini/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: newGeminiKey })
-      });
-      const data = await res.json();
-      if (data.valid) {
-        setGeminiTestResult('Valid Key!');
-      } else {
-        setGeminiTestResult('Invalid Key. Test failed.');
-      }
-    } catch (err) {
-      setGeminiTestResult('Failed to connect to testing server.');
-    }
-  };
+
 
   const saveGeminiKey = async () => {
     try {
@@ -414,11 +413,74 @@ function App() {
       if (data.success) {
         alert("Gemini key replaced successfully!");
         setNewGeminiKey('');
-        setGeminiTestResult(null);
         fetchAppSettings();
+        fetchGeminiKeys(); // Refresh key manager list
       }
     } catch (err) {
       alert("Failed to save key.");
+    }
+  };
+
+  const fetchGeminiKeys = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/settings/gemini-keys`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGeminiKeysList(data.keys || []);
+        setActiveKeyId(data.active_id || 'default');
+      }
+    } catch (err) {
+      console.error("Failed to fetch keys", err);
+    }
+  };
+
+  const testSpecificKey = async (keyId: string, keyValue: string) => {
+    setKeysTestingStatus(prev => ({ ...prev, [keyId]: { status: 'testing', msg: 'Testing...' } }));
+    try {
+      const res = await fetch(`${API_BASE}/api/settings/gemini-keys/test`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ key_value: keyValue })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setKeysTestingStatus(prev => ({ 
+          ...prev, 
+          [keyId]: { 
+            status: data.status, 
+            msg: data.message 
+          } 
+        }));
+      } else {
+        setKeysTestingStatus(prev => ({ ...prev, [keyId]: { status: 'invalid', msg: 'Connection Failed' } }));
+      }
+    } catch (err) {
+      setKeysTestingStatus(prev => ({ ...prev, [keyId]: { status: 'invalid', msg: 'Network Error' } }));
+    }
+  };
+
+  const selectActiveKey = async (keyId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/settings/gemini-keys/select`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ key_id: keyId })
+      });
+      if (res.ok) {
+        setActiveKeyId(keyId);
+        setSettingsUpdateMsg("Active Gemini key updated successfully.");
+        setTimeout(() => setSettingsUpdateMsg(null), 3000);
+      }
+    } catch (err) {
+      console.error("Failed to select key", err);
     }
   };
 
@@ -574,7 +636,17 @@ function App() {
           <div className="space-y-8">
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div>
-                <h1 className="text-3xl font-extrabold tracking-tight text-white">Daily Overview</h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-3xl font-extrabold tracking-tight text-white">Daily Overview</h1>
+                  <button
+                    onClick={() => fetchChannelAnalytics(true)}
+                    disabled={isRefreshingAnalytics}
+                    className="p-2 bg-finance-card border border-yellow-500/10 hover:border-yellow-500/30 text-finance-accent rounded-xl transition-all active:scale-95 shadow-sm"
+                    title="Refresh Analytics"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isRefreshingAnalytics ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
                 <p className="text-sm text-finance-textMuted mt-1">Status cards, general analytics, and manual automation trigger.</p>
               </div>
               
@@ -613,9 +685,9 @@ function App() {
             {/* Statistics Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
-                { title: 'Subscribers', value: channelMetrics.subscriber_count.toLocaleString(), icon: Users, color: 'text-blue-400 border-blue-500/20' },
-                { title: 'Total Views', value: channelMetrics.total_views.toLocaleString(), icon: Tv, color: 'text-finance-success border-green-500/20' },
-                { title: 'Shorts Published', value: channelMetrics.total_videos, icon: Video, color: 'text-purple-400 border-purple-500/20' },
+                { title: 'Subscribers', value: (channelMetrics?.subscriber_count ?? 0).toLocaleString(), icon: Users, color: 'text-blue-400 border-blue-500/20' },
+                { title: 'Total Views', value: (channelMetrics?.total_views ?? 0).toLocaleString(), icon: Tv, color: 'text-finance-success border-green-500/20' },
+                { title: 'Shorts Published', value: channelMetrics?.total_videos ?? 0, icon: Video, color: 'text-purple-400 border-purple-500/20' },
                 { title: 'Quality Threshold', value: `${settingsForm.minimum_news_score} / 100`, icon: Award, color: 'text-finance-accent border-yellow-500/20' },
               ].map((stat, idx) => (
                 <div key={idx} className={`glass-panel p-6 rounded-2xl border ${stat.color} flex items-center justify-between`}>
@@ -637,16 +709,16 @@ function App() {
                 </h3>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={videoAnalytics.slice().reverse()}>
+                    <BarChart data={videoAnalytics.slice().reverse()}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(241, 196, 15, 0.05)" />
                       <XAxis dataKey="title" tickFormatter={(t) => t.split(' | ')[0].slice(0, 15) + '...'} stroke="#8892b0" fontSize={11} />
                       <YAxis stroke="#8892b0" fontSize={11} />
                       <Tooltip 
-                        contentStyle={{ backgroundColor: '#112240', border: '1px solid rgba(241, 196, 15, 0.2)', color: '#f8f9fa' }}
+                        contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', color: '#0f172a', borderRadius: '12px' }}
                         labelFormatter={(t) => t}
                       />
-                      <Line type="monotone" dataKey="views" stroke="#2ecc71" strokeWidth={3} dot={{ fill: '#2ecc71', r: 5 }} activeDot={{ r: 8 }} />
-                    </LineChart>
+                      <Bar dataKey="views" fill="#d97706" radius={[6, 6, 0, 0]} barSize={40} />
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
@@ -1014,9 +1086,9 @@ function App() {
                       <div className="flex justify-between items-start">
                         <span className="font-bold text-white text-xs tracking-wider uppercase">Job: {job.job_date}</span>
                         <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                          job.status === 'COMPLETED' ? 'bg-green-950 text-finance-success border border-green-500/20' :
-                          job.status === 'FAILED' ? 'bg-red-950 text-finance-danger border border-red-500/20' :
-                          job.status === 'SKIPPED' ? 'bg-zinc-800 text-zinc-400' : 'bg-yellow-950 text-finance-accent border border-yellow-500/20 animate-pulse'
+                          job.status === 'COMPLETED' ? 'bg-finance-success/15 text-finance-success border border-finance-success/25' :
+                          job.status === 'FAILED' ? 'bg-finance-danger/15 text-finance-danger border border-finance-danger/25' :
+                          job.status === 'SKIPPED' ? 'bg-zinc-100 text-zinc-600 border border-zinc-200' : 'bg-finance-accent/15 text-finance-accent border border-finance-accent/25 animate-pulse'
                         }`}>
                           {job.status}
                         </span>
@@ -1264,44 +1336,90 @@ function App() {
               <div className="glass-panel p-6 rounded-2xl border border-yellow-500/10 space-y-6">
                 <h3 className="font-bold text-white text-base border-b border-yellow-500/10 pb-3">AI Settings (Gemini)</h3>
                 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-finance-text uppercase tracking-wider mb-2">Gemini API Key</label>
-                    <input 
-                      type="password" 
-                      value={newGeminiKey}
-                      onChange={(e) => setNewGeminiKey(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-finance-dark/50 border border-yellow-500/20 focus:border-finance-accent/60 outline-none rounded-xl text-white placeholder-slate-600 transition-colors"
-                      placeholder="Replace Gemini API Key..."
-                    />
-                    <p className="text-[10px] text-finance-textMuted mt-1">The key is encrypted at rest in database storage and never returned in plaintext.</p>
+                <div className="space-y-6">
+                  {/* Replace Key Input */}
+                  <div className="space-y-4 border-b border-zinc-900 pb-5">
+                    <label className="block text-xs font-semibold text-finance-text uppercase tracking-wider">Configure Custom Key (DB)</label>
+                    <div className="flex gap-3">
+                      <input 
+                        type="password" 
+                        value={newGeminiKey}
+                        onChange={(e) => setNewGeminiKey(e.target.value)}
+                        className="flex-1 px-4 py-2 bg-finance-dark/50 border border-yellow-500/20 focus:border-finance-accent/60 outline-none rounded-xl text-white placeholder-slate-600 transition-colors text-sm"
+                        placeholder="Paste new Gemini API Key here..."
+                      />
+                      <button
+                        onClick={saveGeminiKey}
+                        disabled={!newGeminiKey}
+                        className="px-4 py-2 bg-finance-accent hover:bg-yellow-500 text-finance-dark disabled:opacity-50 text-xs font-bold rounded-xl transition-all shadow shadow-yellow-500/10 shrink-0"
+                      >
+                        Save Custom Key
+                      </button>
+                    </div>
                   </div>
 
-                  {geminiTestResult && (
-                    <div className={`text-xs font-semibold px-3 py-2 rounded-lg inline-block ${
-                      geminiTestResult.includes('Valid') 
-                        ? 'bg-green-950/40 text-finance-success border border-green-500/20' 
-                        : 'bg-red-950/40 text-finance-danger border border-red-500/20'
-                    }`}>
-                      {geminiTestResult}
+                  {/* Gemini Key Status Manager */}
+                  <div className="space-y-4">
+                    <label className="block text-xs font-bold text-finance-accent uppercase tracking-wider">Gemini API Key Rotation Manager</label>
+                    <p className="text-[10px] text-finance-textMuted leading-normal">Select which key to use as primary for executions. Remaining configured keys will act as automatic rotation backups.</p>
+                    
+                    <div className="space-y-3.5 mt-3">
+                      {geminiKeysList.map((key) => {
+                        const testStatus = keysTestingStatus[key.id] || { status: 'untested', msg: 'Untested' };
+                        let statusColor = 'text-zinc-500 bg-zinc-900/35 border-zinc-800/40';
+                        if (testStatus.status === 'active') {
+                          statusColor = 'text-finance-success bg-green-950/20 border-green-500/25';
+                        } else if (testStatus.status === 'testing') {
+                          statusColor = 'text-finance-accent bg-yellow-500/10 border-yellow-500/20 animate-pulse';
+                        } else if (testStatus.status === 'limit_reached') {
+                          statusColor = 'text-orange-400 bg-orange-950/20 border-orange-500/20';
+                        } else if (testStatus.status === 'invalid') {
+                          statusColor = 'text-finance-danger bg-red-950/20 border-red-500/20';
+                        }
+                        
+                        return (
+                          <div 
+                            key={key.id} 
+                            className={`p-3.5 bg-finance-dark/40 border rounded-xl flex items-center justify-between transition-all ${
+                              activeKeyId === key.id ? 'border-finance-accent/35 bg-finance-accent/[0.02]' : 'border-zinc-850 bg-finance-dark/25'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <input 
+                                type="radio" 
+                                name="active_key" 
+                                id={`key_${key.id}`}
+                                checked={activeKeyId === key.id}
+                                onChange={() => selectActiveKey(key.id)}
+                                className="accent-yellow-500 w-4 h-4 cursor-pointer shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <label htmlFor={`key_${key.id}`} className="font-bold text-white text-xs leading-none cursor-pointer block">{key.name}</label>
+                                <span className="text-[10px] text-zinc-500 font-mono mt-1.5 block truncate">{key.masked}</span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded border tracking-wide uppercase ${statusColor}`}>
+                                {testStatus.msg}
+                              </span>
+                              {key.value && (
+                                <button
+                                  onClick={() => testSpecificKey(key.id, key.value)}
+                                  disabled={testStatus.status === 'testing'}
+                                  className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-finance-text text-[10px] font-bold rounded-lg transition-all"
+                                >
+                                  Test Connection
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {geminiKeysList.length === 0 && (
+                        <div className="text-center py-6 text-zinc-500 text-xs italic">Loading Gemini key options...</div>
+                      )}
                     </div>
-                  )}
-
-                  <div className="flex gap-4 pt-2">
-                    <button
-                      onClick={testGeminiKey}
-                      disabled={!newGeminiKey}
-                      className="px-4 py-2.5 bg-zinc-800 text-finance-text hover:bg-zinc-700 disabled:opacity-50 text-xs font-bold rounded-xl transition-all"
-                    >
-                      Test Key
-                    </button>
-                    <button
-                      onClick={saveGeminiKey}
-                      disabled={!newGeminiKey}
-                      className="px-4 py-2.5 bg-finance-accent hover:bg-yellow-500 text-finance-dark disabled:opacity-50 text-xs font-bold rounded-xl transition-all shadow shadow-yellow-500/10"
-                    >
-                      Save Key
-                    </button>
                   </div>
                 </div>
               </div>

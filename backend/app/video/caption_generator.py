@@ -59,7 +59,9 @@ class CaptionGenerator:
         return [c for c in final_chunks if c.strip()]
 
     def generate_srt(self, script_text: str, total_duration: float, output_srt_path: str) -> str:
-        print(f"CaptionGenerator: Generating SRT subtitles for {total_duration}s audio...")
+        # Cap subtitle duration to end 3 seconds before video ends to avoid CTA overlaps
+        subtitle_duration = max(0.0, total_duration - 3.0)
+        print(f"CaptionGenerator: Generating SRT subtitles for {subtitle_duration}s (capped from {total_duration}s)...")
         chunks = self.split_script_into_chunks(script_text)
         
         if not chunks:
@@ -78,7 +80,7 @@ class CaptionGenerator:
 
         for i, chunk in enumerate(chunks):
             # Proportional duration distribution
-            chunk_duration = total_duration * (len(chunk) / total_chars)
+            chunk_duration = subtitle_duration * (len(chunk) / total_chars)
             
             start_str = self.format_srt_time(current_time)
             end_str = self.format_srt_time(current_time + chunk_duration)
