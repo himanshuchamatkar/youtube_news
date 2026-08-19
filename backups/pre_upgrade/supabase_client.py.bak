@@ -89,11 +89,6 @@ class QueryBuilder:
                             row_dict["hashtags"] = json.loads(row_dict["hashtags"])
                         except Exception:
                             pass
-                    if "source_urls" in row_dict and row_dict["source_urls"] and isinstance(row_dict["source_urls"], str):
-                        try:
-                            row_dict["source_urls"] = json.loads(row_dict["source_urls"])
-                        except Exception:
-                            pass
                     for k, v in row_dict.items():
                         if k in ["is_test", "is_encrypted", "auto_upload", "auto_voice"]:
                             row_dict[k] = True if v == 1 else False
@@ -342,26 +337,6 @@ class SupabaseClientMock:
             )
             """)
             
-            # --- Schema Migrations (non-destructive) ---
-            # Add is_test column to videos table
-            try:
-                cursor.execute("ALTER TABLE videos ADD COLUMN is_test INTEGER DEFAULT 0")
-            except Exception:
-                pass  # Column already exists
-            
-            # Add execution_type column to video_jobs table
-            try:
-                cursor.execute("ALTER TABLE video_jobs ADD COLUMN execution_type TEXT DEFAULT 'public'")
-            except Exception:
-                pass  # Column already exists
-            
-            # Backfill execution_type from is_test for existing rows
-            try:
-                cursor.execute("UPDATE video_jobs SET execution_type = 'test' WHERE is_test = 1 AND (execution_type IS NULL OR execution_type = 'public')")
-                cursor.execute("UPDATE videos SET is_test = 1 WHERE job_id IN (SELECT id FROM video_jobs WHERE is_test = 1) AND is_test = 0")
-            except Exception:
-                pass
-
             conn.commit()
         finally:
             conn.close()

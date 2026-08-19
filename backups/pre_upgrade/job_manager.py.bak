@@ -1,5 +1,4 @@
 import os
-import glob
 import time
 import traceback
 import threading
@@ -61,8 +60,7 @@ class JobManager:
                     "status": "RUNNING",
                     "progress": 0,
                     "current_stage": "initialized",
-                    "is_test": True,
-                    "execution_type": "test"
+                    "is_test": True
                 }).execute()
                 if res.data:
                     return res.data[0]["id"]
@@ -93,8 +91,7 @@ class JobManager:
                 "status": "RUNNING",
                 "progress": 0,
                 "current_stage": "initialized",
-                "is_test": False,
-                "execution_type": "public"
+                "is_test": False
             }).execute()
             
             if res.data:
@@ -137,7 +134,7 @@ class JobManager:
             check_cancellation()
             
             # --- STAGE 1: FETCHING NEWS ---
-            self.update_job_progress(supabase, job_id, "FETCHING_NEWS", 5, "Fetching raw news from all providers")
+            self.update_job_progress(supabase, job_id, "FETCHING_NEWS", 10, "Fetching raw news")
             self.log_stage(supabase, job_id, "FETCHING_NEWS", "INFO", "Started news ingestion from all providers.")
             s1_start = time.time()
             
@@ -199,7 +196,7 @@ class JobManager:
 
             check_cancellation()
             # --- STAGE 2: ANALYZING & SELECTING WINNER ---
-            self.update_job_progress(supabase, job_id, "ANALYZING", 20, "Analyzing and selecting best story")
+            self.update_job_progress(supabase, job_id, "ANALYZING", 30, "Selecting best story via Gemini")
             self.log_stage(supabase, job_id, "ANALYZING", "INFO", "Starting Gemini evaluations on top articles.")
             s2_start = time.time()
             
@@ -275,7 +272,7 @@ class JobManager:
 
             check_cancellation()
             # --- STAGE 3: SCRIPT GENERATING ---
-            self.update_job_progress(supabase, job_id, "SCRIPTING", 35, "Generating narration script")
+            self.update_job_progress(supabase, job_id, "SCRIPT_GENERATING", 45, "Generating Shorts script")
             s3_start = time.time()
             
             try:
@@ -307,15 +304,6 @@ class JobManager:
                     disclaimer="This content is for informational purposes only and is not financial advice."
                 )
             
-            # Force the last line to be the common CTA line
-            cta_end = " Please like, share, and subscribe!"
-            if not script_data.script.strip().endswith(("subscribe!", "subscribe.")):
-                script_data.script = script_data.script.strip()
-                if script_data.script.endswith((".", "!", "?")):
-                    script_data.script += cta_end
-                else:
-                    script_data.script += "." + cta_end
-            
             if winner_article.get("id"):
                 supabase.table("scripts").insert({
                     "news_article_id": winner_article["id"],
@@ -327,12 +315,11 @@ class JobManager:
                 }).execute()
             
             s3_dur = time.time() - s3_start
-            self.log_stage(supabase, job_id, "SCRIPTING", "SUCCESS", f"Generated Short script. Title: '{script_data.title}'", duration=s3_dur)
+            self.log_stage(supabase, job_id, "SCRIPT_GENERATING", "SUCCESS", f"Generated Short script. Title: '{script_data.title}'", duration=s3_dur)
 
             check_cancellation()
-            # --- STAGE 4: GENERATING AUDIO ---
-            self.update_job_progress(supabase, job_id, "GENERATING_AUDIO", 45, "Synthesizing TTS narration")
-            self.log_stage(supabase, job_id, "GENERATING_AUDIO", "INFO", "Starting audio generation...")
+            # --- STAGE 4: MEDIA GENERATING ---
+            self.update_job_progress(supabase, job_id, "VISUAL_GENERATING", 60, "Generating voice, charts & rendering video")
             s4_start = time.time()
             
             script_dict = {
@@ -341,16 +328,6 @@ class JobManager:
                 "company": winner_evaluation.company,
                 "sector": winner_evaluation.sector
             }
-            
-            check_cancellation()
-            # --- STAGE 5: GENERATING VISUALS ---
-            self.update_job_progress(supabase, job_id, "GENERATING_VISUALS", 55, "Creating financial graphics and charts")
-            self.log_stage(supabase, job_id, "GENERATING_VISUALS", "INFO", "Generating dynamic visual cards from news data...")
-            
-            check_cancellation()
-            # --- STAGE 6: RENDERING ---
-            self.update_job_progress(supabase, job_id, "RENDERING", 65, "Rendering final video with FFmpeg")
-            self.log_stage(supabase, job_id, "RENDERING", "INFO", "Compositing video layers and burning captions...")
             
             loop2 = asyncio.new_event_loop()
             asyncio.set_event_loop(loop2)
@@ -362,11 +339,11 @@ class JobManager:
                 loop2.close()
                 
             s4_dur = time.time() - s4_start
-            self.log_stage(supabase, job_id, "RENDERING", "SUCCESS", f"Assembled 1080x1920 Short video at {rendered_video_path}", duration=s4_dur)
+            self.log_stage(supabase, job_id, "VISUAL_GENERATING", "SUCCESS", f"Assembled 1080x1920 Short video at {rendered_video_path}", duration=s4_dur)
 
             check_cancellation()
-            # --- STAGE 7: QUALITY CHECK / VALIDATING ---
-            self.update_job_progress(supabase, job_id, "VALIDATING", 80, "Running video quality validation")
+            # --- STAGE 5: QUALITY CHECK ---
+            self.update_job_progress(supabase, job_id, "QUALITY_CHECK", 80, "Running video quality validation")
             s5_start = time.time()
             
             if not os.path.exists(rendered_video_path):
@@ -381,10 +358,10 @@ class JobManager:
                 raise ValueError(f"Video duration ({v_duration}s) is outside the allowed 30-60 second boundary.")
                 
             s5_dur = time.time() - s5_start
-            self.log_stage(supabase, job_id, "VALIDATING", "SUCCESS", f"Video passed quality checks. Duration: {v_duration:.2f}s | Size: {v_size/1024/1024:.2f}MB", duration=s5_dur)
+            self.log_stage(supabase, job_id, "QUALITY_CHECK", "SUCCESS", f"Video passed quality checks. Duration: {v_duration:.2f}s | Size: {v_size/1024/1024:.2f}MB", duration=s5_dur)
 
             check_cancellation()
-            # --- STAGE 8: UPLOADING ---
+            # --- STAGE 6: UPLOADING / LOCAL SAVE ---
             privacy = "unlisted" if is_test else "public"
             title_prefix = "[TEST] " if is_test else ""
             status_str = "test" if is_test else "uploaded"
@@ -408,8 +385,7 @@ class JobManager:
                 "youtube_url": upload_res["youtube_url"],
                 "duration": int(v_duration),
                 "source_urls": [winner_article["url"]],
-                "status": status_str,
-                "is_test": is_test
+                "status": status_str
             }).execute()
 
             s6_dur = time.time() - s6_start
@@ -433,16 +409,8 @@ class JobManager:
             print(f"JobManager: Critical Pipeline Failure:\n{trace}")
             
             total_dur = time.time() - start_time
-            
-            # Determine if this was a cancellation or a real failure
-            is_cancelled = job_id in self.cancelled_jobs or "cancelled by user" in str(e).lower()
-            final_status = "CANCELLED" if is_cancelled else "FAILED"
-            
-            self.update_job_progress(supabase, job_id, final_status, 100, final_status, error_message=str(e))
-            self.log_stage(supabase, job_id, "COMPLETED", final_status, f"Pipeline {final_status.lower()}: {e}", duration=total_dur, error=trace if not is_cancelled else None)
-            
-            # Cleanup temp files on failure/cancellation
-            self.cleanup_temp_files(job_id)
+            self.update_job_progress(supabase, job_id, "FAILED", 100, "Failed", error_message=str(e))
+            self.log_stage(supabase, job_id, "COMPLETED", "FAILED", f"Pipeline failed: {e}", duration=total_dur, error=trace)
 
     def start_pipeline_job(self, is_test: bool = False) -> str:
         # Starts the job in a background thread
@@ -476,28 +444,3 @@ class JobManager:
             print("JobManager: Terminated active FFmpeg/FFprobe processes.")
         except Exception as kill_err:
             print(f"JobManager: Failed to terminate ffmpeg processes: {kill_err}")
-
-    def cleanup_temp_files(self, job_id: str):
-        """Remove temporary files associated with a job (safe for failed/cancelled jobs)."""
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-        temp_dir = os.path.join(base_dir, "media", "temp")
-        audio_dir = os.path.join(base_dir, "media", "audio")
-        chart_dir = os.path.join(base_dir, "media", "charts")
-        
-        patterns = [
-            os.path.join(temp_dir, f"*{job_id}*"),
-            os.path.join(audio_dir, f"*{job_id}*"),
-            os.path.join(chart_dir, f"*{job_id}*"),
-        ]
-        
-        cleaned = 0
-        for pattern in patterns:
-            for f in glob.glob(pattern):
-                try:
-                    os.remove(f)
-                    cleaned += 1
-                except Exception:
-                    pass
-        
-        if cleaned > 0:
-            print(f"JobManager: Cleaned up {cleaned} temporary files for job {job_id}.")

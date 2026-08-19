@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime, date, timezone
-from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks, Query
+from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -173,7 +173,7 @@ def cancel_job_execution(id: str, username: str = Depends(verify_token)):
         supabase = get_supabase_client()
         # 1. Update job status in database
         supabase.table("video_jobs").update({
-            "status": "CANCELLED",
+            "status": "FAILED",
             "error_message": "Cancelled by user"
         }).eq("id", id).execute()
         
@@ -181,16 +181,13 @@ def cancel_job_execution(id: str, username: str = Depends(verify_token)):
         supabase.table("job_logs").insert({
             "job_id": id,
             "stage": "COMPLETED",
-            "status": "CANCELLED",
+            "status": "FAILED",
             "message": "Job cancelled and terminated by user from dashboard.",
             "duration": 0
         }).execute()
         
         # 3. Call job manager cancellation
         job_manager.cancel_job(id)
-        
-        # 4. Cleanup temp files
-        job_manager.cleanup_temp_files(id)
         
         return {"success": True, "message": "Job cancellation request sent successfully."}
     except Exception as e:
@@ -237,149 +234,6 @@ def get_job_status(id: str, username: str = Depends(verify_token)):
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-# --- DELETE ENDPOINTS ---
-
-@app.delete("/api/jobs/{id}")
-def delete_job(id: str, username: str = Depends(verify_token)):
-    """Delete a job and its associated logs, videos, and temp files."""
-    try:
-        supabase = get_supabase_client()
-        
-        # Check job exists and is not actively running
-        job_res = supabase.table("video_jobs").select("*").eq("id", id).execute()
-        if not job_res.data:
-            raise HTTPException(status_code=404, detail="Job not found")
-        
-        job = job_res.data[0]
-        active_statuses = ["RUNNING", "FETCHING_NEWS", "ANALYZING", "SCRIPTING", 
-                           "GENERATING_AUDIO", "GENERATING_VISUALS", "RENDERING",
-                           "VALIDATING", "UPLOADING", "QUEUED"]
-        if job["status"] in active_statuses:
-            raise HTTPException(status_code=400, detail="Cannot delete an actively running job. Cancel it first.")
-        
-        # Delete associated video records
-        supabase.table("videos").delete().eq("job_id", id).execute()
-        
-        # Delete associated logs
-        supabase.table("job_logs").delete().eq("job_id", id).execute()
-        
-        # Delete the job itself
-        supabase.table("video_jobs").delete().eq("id", id).execute()
-        
-        # Cleanup any remaining temp files
-        job_manager.cleanup_temp_files(id)
-        
-        # Also try to remove rendered video
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        video_path = os.path.join(base_dir, "media", "rendered", f"short_{id}.mp4")
-        if os.path.exists(video_path):
-            try:
-                os.remove(video_path)
-            except Exception:
-                pass
-        
-        return {"success": True, "message": f"Job and all associated records deleted.", "deleted_job_id": id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/videos/{id}")
-def delete_video(id: str, username: str = Depends(verify_token)):
-    """Delete a video record from the database."""
-    try:
-        supabase = get_supabase_client()
-        
-        vid_res = supabase.table("videos").select("*").eq("id", id).execute()
-        if not vid_res.data:
-            raise HTTPException(status_code=404, detail="Video not found")
-        
-        supabase.table("videos").delete().eq("id", id).execute()
-        
-        return {"success": True, "message": f"Video deleted.", "deleted_video_id": id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/jobs/bulk-delete")
-def bulk_delete_jobs(action: str = "failed", username: str = Depends(verify_token)):
-    """Bulk delete jobs by category: failed, cancelled, test, old, all_finished."""
-    try:
-        supabase = get_supabase_client()
-        deleted_count = 0
-        
-        active_statuses = ["RUNNING", "FETCHING_NEWS", "ANALYZING", "SCRIPTING",
-                           "GENERATING_AUDIO", "GENERATING_VISUALS", "RENDERING",
-                           "VALIDATING", "UPLOADING", "QUEUED"]
-        
-        # Get all jobs
-        jobs_res = supabase.table("video_jobs").select("id, status, is_test, started_at").execute()
-        job_ids = []
-        
-        for job in (jobs_res.data or []):
-            # Never delete actively running jobs
-            if job["status"] in active_statuses:
-                continue
-            
-            if action == "failed" and job["status"] != "FAILED":
-                continue
-            elif action == "cancelled" and job["status"] != "CANCELLED":
-                continue
-            elif action == "test" and not job.get("is_test", False):
-                continue
-            elif action == "old":
-                from datetime import timedelta
-                cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-                if job.get("started_at", "") > cutoff:
-                    continue
-            elif action == "all_finished":
-                if job["status"] not in ["COMPLETED", "FAILED", "CANCELLED", "SKIPPED"]:
-                    continue
-            elif action not in ["failed", "cancelled", "test", "old", "all_finished"]:
-                raise HTTPException(status_code=400, detail=f"Unknown bulk action: {action}")
-            
-            job_ids.append(job["id"])
-        
-        for jid in job_ids:
-            try:
-                supabase.table("videos").delete().eq("job_id", jid).execute()
-                supabase.table("job_logs").delete().eq("job_id", jid).execute()
-                supabase.table("video_jobs").delete().eq("id", jid).execute()
-                job_manager.cleanup_temp_files(jid)
-                deleted_count += 1
-            except Exception:
-                pass
-        
-        return {"success": True, "deleted_count": deleted_count, "action": action}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/job-logs/bulk-delete")
-def bulk_delete_logs(action: str = "all", username: str = Depends(verify_token)):
-    """Clear old/unwanted log entries. Actions: all, failed, old."""
-    try:
-        supabase = get_supabase_client()
-        
-        if action == "failed":
-            supabase.table("job_logs").delete().eq("status", "FAILED").execute()
-        elif action == "all":
-            # Delete logs for completed/failed/cancelled jobs only (preserve running job logs)
-            jobs_res = supabase.table("video_jobs").select("id, status").execute()
-            for job in (jobs_res.data or []):
-                if job["status"] in ["COMPLETED", "FAILED", "CANCELLED", "SKIPPED"]:
-                    supabase.table("job_logs").delete().eq("job_id", job["id"]).execute()
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown log cleanup action: {action}")
-        
-        return {"success": True, "message": f"Log cleanup ({action}) completed."}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # --- NEWS ROUTING ---
 
@@ -440,124 +294,48 @@ def get_video_detail(id: str):
 # --- ANALYTICS ---
 
 @app.get("/api/analytics/channel")
-def get_channel_analytics(refresh: bool = False, filter: str = Query("all", regex="^(public|test|all)$")):
+def get_channel_analytics(refresh: bool = False):
     try:
         supabase = get_supabase_client()
         
-        # 1. Try fetching real-time video list directly from YouTube API first
-        videos = youtube_service.fetch_channel_videos()
-        
-        if videos:
-            # Filter based on YouTube live privacy status
-            if filter == "public":
-                filtered_vids = [v for v in videos if not v["is_test"]]
-            elif filter == "test":
-                filtered_vids = [v for v in videos if v["is_test"]]
-            else:
-                filtered_vids = videos
-                
-            total_views = sum(v.get("views", 0) for v in filtered_vids)
-            total_videos = len(filtered_vids)
-            
-            # Fetch subscriber count (use cache if < 10 mins old and not refresh)
-            subscriber_count = 0
-            cache_res = supabase.table("channel_metrics").select("*").order("captured_at", desc=True).limit(1).execute()
-            
-            use_cache = False
-            if not refresh and cache_res.data:
-                cached_stat = cache_res.data[0]
-                try:
-                    date_str = cached_stat["captured_at"]
-                    if "T" not in date_str and " " in date_str:
-                        date_str = date_str.replace(" ", "T")
-                    if "+" not in date_str and "-" not in date_str[-6:] and "Z" not in date_str:
-                        date_str += "+00:00"
-                    cap_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                    age_mins = (datetime.now(timezone.utc) - cap_dt).total_seconds() / 60.0
-                    if age_mins < 10.0:
-                        subscriber_count = cached_stat.get("subscriber_count", 0)
-                        use_cache = True
-                except Exception as dt_err:
-                    print(f"YouTube Service: Failed to parse captured_at '{cached_stat.get('captured_at')}': {dt_err}")
-                    
-            if not use_cache:
-                stats = youtube_service.fetch_channel_metrics()
-                subscriber_count = stats.get("subscriber_count", 0)
-                # Save to cache
-                try:
-                    overall_views = sum(v.get("views", 0) for v in videos)
-                    supabase.table("channel_metrics").insert({
-                        "subscriber_count": subscriber_count,
-                        "total_views": overall_views,
-                        "total_likes": 0,
-                        "total_comments": 0
-                    }).execute()
-                except Exception:
-                    pass
-                    
-            return {
-                "subscriber_count": subscriber_count,
-                "total_views": total_views,
-                "total_videos": total_videos,
-                "total_likes": 0,
-                "total_comments": 0,
-                "success": True
-            }
-            
-        # 2. Fallback to local SQLite Database if YouTube API is unconfigured
-        if filter == "public":
-            vids_res = supabase.table("videos").select("youtube_video_id").eq("is_test", False).execute()
-        elif filter == "test":
-            vids_res = supabase.table("videos").select("youtube_video_id").eq("is_test", True).execute()
-        else:
-            vids_res = supabase.table("videos").select("youtube_video_id").execute()
-            
+        # 1. Fetch video IDs from our database
+        vids_res = supabase.table("videos").select("youtube_video_id").execute()
         video_ids = [v["youtube_video_id"] for v in vids_res.data if v.get("youtube_video_id")] if vids_res.data else []
         total_videos = len(vids_res.data) if vids_res.data else 0
         
-        # Check cache
-        if not refresh:
-            cache_res = supabase.table("channel_metrics").select("*").order("captured_at", desc=True).limit(1).execute()
-            if cache_res.data:
-                cached_stat = cache_res.data[0]
-                try:
-                    date_str = cached_stat["captured_at"]
-                    if "T" not in date_str and " " in date_str:
-                        date_str = date_str.replace(" ", "T")
-                    if "+" not in date_str and "-" not in date_str[-6:] and "Z" not in date_str:
-                        date_str += "+00:00"
-                    cap_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                    age_mins = (datetime.now(timezone.utc) - cap_dt).total_seconds() / 60.0
-                    if age_mins < 10.0:
-                        return {
-                            "subscriber_count": cached_stat.get("subscriber_count", 0),
-                            "total_views": cached_stat.get("total_views", 0),
-                            "total_videos": total_videos,
-                            "total_likes": 0,
-                            "total_comments": 0,
-                            "success": True
-                        }
-                except Exception as dt_err:
-                    print(f"YouTube Service: Failed to parse captured_at '{cached_stat.get('captured_at')}': {dt_err}")
-        
+        # 2. Batch fetch views from YouTube API
         total_views = 0
         if video_ids:
             metrics_dict = youtube_service.fetch_multiple_videos_metrics(video_ids)
             total_views = sum(m.get("views", 0) for m in metrics_dict.values())
-            
-        stats = youtube_service.fetch_channel_metrics()
-        subscriber_count = stats.get("subscriber_count", 0)
         
-        try:
-            supabase.table("channel_metrics").insert({
-                "subscriber_count": subscriber_count,
-                "total_views": total_views,
-                "total_likes": 0,
-                "total_comments": 0
-            }).execute()
-        except Exception:
-            pass
-            
+        # 3. Get subscriber count (from cache if < 10 mins old and refresh is False, else fetch fresh via scraping)
+        subscriber_count = 0
+        cache_res = supabase.table("channel_metrics").select("*").order("captured_at", desc=True).limit(1).execute()
+        
+        use_cache = False
+        if not refresh and cache_res.data:
+            cached_stat = cache_res.data[0]
+            cap_dt = datetime.fromisoformat(cached_stat["captured_at"].replace("Z", "+00:00"))
+            age_mins = (datetime.now(timezone.utc) - cap_dt).total_seconds() / 60.0
+            if age_mins < 10.0:
+                subscriber_count = cached_stat.get("subscriber_count", 0)
+                use_cache = True
+                
+        if not use_cache:
+            stats = youtube_service.fetch_channel_metrics()
+            subscriber_count = stats.get("subscriber_count", 0)
+            # Write new cache
+            try:
+                supabase.table("channel_metrics").insert({
+                    "subscriber_count": subscriber_count,
+                    "total_views": total_views,
+                    "total_likes": 0,
+                    "total_comments": 0
+                }).execute()
+            except Exception:
+                pass
+                
         return {
             "subscriber_count": subscriber_count,
             "total_views": total_views,
@@ -571,52 +349,32 @@ def get_channel_analytics(refresh: bool = False, filter: str = Query("all", rege
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/videos")
-def get_videos_analytics(filter: str = Query("all", regex="^(public|test|all)$")):
+def get_videos_analytics():
     try:
-        videos = youtube_service.fetch_channel_videos()
+        supabase = get_supabase_client()
+        videos_res = supabase.table("videos").select("id, title, published_at, youtube_video_id, youtube_url").execute()
         
-        # If API failed or returned empty list (e.g. no key), fallback to SQLite database
-        if not videos:
-            supabase = get_supabase_client()
-            if filter == "public":
-                videos_res = supabase.table("videos").select("id, title, published_at, youtube_video_id, youtube_url, is_test, status").eq("is_test", False).execute()
-            elif filter == "test":
-                videos_res = supabase.table("videos").select("id, title, published_at, youtube_video_id, youtube_url, is_test, status").eq("is_test", True).execute()
-            else:
-                videos_res = supabase.table("videos").select("id, title, published_at, youtube_video_id, youtube_url, is_test, status").execute()
+        video_ids = [v["youtube_video_id"] for v in videos_res.data if v.get("youtube_video_id")] if videos_res.data else []
+        metrics_dict = {}
+        if video_ids:
+            metrics_dict = youtube_service.fetch_multiple_videos_metrics(video_ids)
             
-            video_ids = [v["youtube_video_id"] for v in videos_res.data if v.get("youtube_video_id")] if videos_res.data else []
-            metrics_dict = {}
-            if video_ids:
-                metrics_dict = youtube_service.fetch_multiple_videos_metrics(video_ids)
-                
-            analytics_list = []
-            for vid in videos_res.data:
-                yt_id = vid.get("youtube_video_id")
-                stats = metrics_dict.get(yt_id, {"views": 0, "likes": 0, "comments": 0}) if yt_id else {"views": 0, "likes": 0, "comments": 0}
-                
-                analytics_list.append({
-                    "id": vid["id"],
-                    "title": vid["title"],
-                    "published_at": vid["published_at"],
-                    "youtube_url": vid["youtube_url"],
-                    "views": stats["views"],
-                    "likes": stats["likes"],
-                    "comments": stats["comments"],
-                    "is_test": vid.get("is_test", False),
-                    "status": vid.get("status", "unknown")
-                })
-            return analytics_list
+        analytics_list = []
+        for vid in videos_res.data:
+            yt_id = vid.get("youtube_video_id")
+            stats = metrics_dict.get(yt_id, {"views": 0, "likes": 0, "comments": 0}) if yt_id else {"views": 0, "likes": 0, "comments": 0}
             
-        # Apply filter on API list
-        if filter == "public":
-            filtered = [v for v in videos if not v["is_test"]]
-        elif filter == "test":
-            filtered = [v for v in videos if v["is_test"]]
-        else:
-            filtered = videos
+            analytics_list.append({
+                "id": vid["id"],
+                "title": vid["title"],
+                "published_at": vid["published_at"],
+                "youtube_url": vid["youtube_url"],
+                "views": stats["views"],
+                "likes": stats["likes"],
+                "comments": stats["comments"]
+            })
             
-        return filtered
+        return analytics_list
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

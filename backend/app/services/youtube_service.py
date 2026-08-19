@@ -23,6 +23,12 @@ class YouTubeService:
             client_secret=self.client_secret
         )
 
+    def _get_api_client(self):
+        if getattr(settings, "YOUTUBE_API_KEY", ""):
+            return build("youtube", "v3", developerKey=settings.YOUTUBE_API_KEY)
+        creds = self._get_credentials()
+        return build("youtube", "v3", credentials=creds)
+
     def upload_short(self, video_path: str, title: str, description: str, tags: List[str], privacy_status: str = "public") -> Dict[str, Any]:
         print(f"YouTube Service: Starting video upload for {video_path}...")
         if not os.path.exists(video_path):
@@ -74,7 +80,32 @@ class YouTubeService:
             raise e
 
     def fetch_channel_metrics(self) -> Dict[str, Any]:
-        # Fetches aggregate subscriber count and videos by scraping public handle page
+        # Try official YouTube API first
+        try:
+            youtube = self._get_api_client()
+            if getattr(settings, "YOUTUBE_API_KEY", ""):
+                res = youtube.channels().list(forHandle="@himanshuChamatkar", part="statistics").execute()
+            else:
+                res = youtube.channels().list(mine=True, part="statistics").execute()
+                
+            if res.get("items"):
+                stats = res["items"][0]["statistics"]
+                sub_count = int(stats.get("subscriberCount", 0))
+                total_views = int(stats.get("viewCount", 0))
+                vid_count = int(stats.get("videoCount", 0))
+                print(f"YouTube Service: Fetched channel stats via API (Subs: {sub_count}, Views: {total_views}, Videos: {vid_count})")
+                return {
+                    "subscriber_count": sub_count,
+                    "total_views": total_views,
+                    "total_videos": vid_count,
+                    "total_likes": 0,
+                    "total_comments": 0,
+                    "success": True
+                }
+        except Exception as e:
+            print(f"YouTube Service: Fetching channel metrics via API failed: {e}. Falling back to scraping...")
+
+        # Fallback: Scrape public handle page
         try:
             import httpx
             import re
@@ -178,6 +209,31 @@ class YouTubeService:
 
     def fetch_multiple_videos_metrics(self, video_ids: List[str]) -> Dict[str, Dict[str, int]]:
         res_dict = {}
+        if not video_ids:
+            return res_dict
+            
+        # Try official YouTube API list first
+        try:
+            youtube = self._get_api_client()
+            
+            chunks = [video_ids[i:i + 50] for i in range(0, len(video_ids), 50)]
+            for chunk in chunks:
+                id_str = ",".join(chunk)
+                res = youtube.videos().list(id=id_str, part="statistics").execute()
+                for item in res.get("items", []):
+                    vid_id = item["id"]
+                    stats = item.get("statistics", {})
+                    res_dict[vid_id] = {
+                        "views": int(stats.get("viewCount", 0)),
+                        "likes": int(stats.get("likeCount", 0)),
+                        "comments": int(stats.get("commentCount", 0))
+                    }
+            print(f"YouTube Service: Fetched {len(res_dict)} video metrics via API")
+            return res_dict
+        except Exception as e:
+            print(f"YouTube Service: Fetching video metrics via API failed: {e}. Falling back to watch page scraping...")
+
+        # Fallback to watch page scraping
         for vid_id in video_ids:
             metrics = self.fetch_video_metrics(vid_id)
             if metrics.get("success", False):
@@ -197,3 +253,70 @@ class YouTubeService:
             "total_videos": 0,
             "success": False
         }
+
+    def fetch_channel_videos(self) -> List[Dict[str, Any]]:
+        video_list = []
+        try:
+            youtube = self._get_api_client()
+            
+            # 1. Get channel uploads playlist ID
+            if getattr(settings, "YOUTUBE_API_KEY", ""):
+                res = youtube.channels().list(forHandle="@himanshuChamatkar", part="contentDetails").execute()
+            else:
+                res = youtube.channels().list(mine=True, part="contentDetails").execute()
+                
+            if not res.get("items"):
+                return []
+                
+            uploads_playlist_id = res["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+            
+            # 2. Get playlist items (up to 50 latest videos)
+            playlist_res = youtube.playlistItems().list(
+                playlistId=uploads_playlist_id,
+                part="snippet",
+                maxResults=50
+            ).execute()
+            
+            items = playlist_res.get("items", [])
+            if not items:
+                return []
+                
+            video_ids = [item["snippet"]["resourceId"]["videoId"] for item in items]
+            
+            # 3. Get detailed status and statistics for these videos
+            id_str = ",".join(video_ids)
+            videos_res = youtube.videos().list(
+                id=id_str,
+                part="snippet,statistics,status"
+            ).execute()
+            
+            for item in videos_res.get("items", []):
+                vid_id = item["id"]
+                snippet = item.get("snippet", {})
+                stats = item.get("statistics", {})
+                status = item.get("status", {})
+                
+                privacy = status.get("privacyStatus", "public") # public, private, unlisted
+                is_test = privacy in ["private", "unlisted"]
+                
+                video_list.append({
+                    "id": vid_id,
+                    "title": snippet.get("title", "YouTube Video"),
+                    "published_at": snippet.get("publishedAt", ""),
+                    "views": int(stats.get("viewCount", 0)),
+                    "likes": int(stats.get("likeCount", 0)),
+                    "comments": int(stats.get("commentCount", 0)),
+                    "status": "test" if is_test else "uploaded",
+                    "is_test": is_test,
+                    "youtube_url": f"https://youtu.be/{vid_id}",
+                    "duration": 45,
+                    "job_id": ""
+                })
+            
+            # Sort by publish time descending
+            video_list.sort(key=lambda x: x["published_at"], reverse=True)
+            return video_list
+            
+        except Exception as e:
+            print(f"YouTube Service: Fetching channel videos via API failed: {e}")
+            return []

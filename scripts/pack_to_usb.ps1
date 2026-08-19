@@ -22,6 +22,7 @@ $SubDirs = @(
     "media\charts",
     "media\temp",
     "media\backgrounds",
+    "logo",
     "ollama",
     "models"
 )
@@ -43,15 +44,34 @@ Copy-Item -Path "$SourceDir\scripts\*" -Destination "$DestDir\scripts" -Recurse 
 
 # 4. Copy Precompiled Frontend Static Build
 Write-Host "Copying Static Frontend Build..." -ForegroundColor Yellow
+if (Test-Path "$DestDir\frontend\dist") {
+    Remove-Item -Path "$DestDir\frontend\dist\*" -Recurse -Force | Out-Null
+}
 Copy-Item -Path "$SourceDir\frontend\dist\*" -Destination "$DestDir\frontend\dist" -Recurse -Force
 
-# 5. Copy Core Configs & Database
+# 5. Copy Core Configs & Database (Do NOT overwrite if already exists on USB to preserve modifications and API keys)
 Write-Host "Copying local database and environment config..." -ForegroundColor Yellow
 if (Test-Path "$SourceDir\factory.db") {
-    Copy-Item -Path "$SourceDir\factory.db" -Destination "$DestDir\factory.db" -Force
+    if (!(Test-Path "$DestDir\factory.db")) {
+        Copy-Item -Path "$SourceDir\factory.db" -Destination "$DestDir\factory.db" -Force
+        Write-Host "Database copied to USB."
+    } else {
+        Write-Host "Database already exists on USB. Preserving local modifications (deletions/jobs)." -ForegroundColor Gray
+    }
 }
 if (Test-Path "$SourceDir\.env") {
-    Copy-Item -Path "$SourceDir\.env" -Destination "$DestDir\.env" -Force
+    if (!(Test-Path "$DestDir\.env")) {
+        Copy-Item -Path "$SourceDir\.env" -Destination "$DestDir\.env" -Force
+        Write-Host "Environment config copied to USB."
+    } else {
+        Write-Host "Environment config already exists on USB. Preserving API keys/settings." -ForegroundColor Gray
+    }
+}
+
+# 5.5 Copy Logo & Branding Assets
+Write-Host "Copying Logo/CTA assets..." -ForegroundColor Yellow
+if (Test-Path "$SourceDir\logo") {
+    Copy-Item -Path "$SourceDir\logo\*" -Destination "$DestDir\logo" -Recurse -Force
 }
 
 # 6. Copy local Ollama installation (making it portable)

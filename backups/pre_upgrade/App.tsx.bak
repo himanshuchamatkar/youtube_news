@@ -3,7 +3,7 @@ import {
   TrendingUp, Tv, FileText, Settings, Activity, Play, 
   RefreshCw, User, Lock, LogOut, AlertCircle, 
   ExternalLink, Clock, Video, Award, Users,
-  Database, Sparkles, Trash2, Filter
+  Database, Sparkles
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -29,11 +29,6 @@ function App() {
   const [selectedJob, setSelectedJob] = useState<any>(null);
   const [consoleTab, setConsoleTab] = useState<'workflow' | 'logs'>('workflow');
   const [isRefreshingAnalytics, setIsRefreshingAnalytics] = useState(false);
-  const [analyticsFilter, setAnalyticsFilter] = useState<'public' | 'test' | 'all'>('public');
-  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
-  const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
-  const [bulkDeleteAction, setBulkDeleteAction] = useState<string | null>(null);
-  const [bulkDeleteResult, setBulkDeleteResult] = useState<string | null>(null);
 
   const getStageInfo = (stageName: string) => {
     if (!selectedJob || !selectedJob.logs) return { status: 'PENDING', duration: 0, error: null };
@@ -168,33 +163,6 @@ function App() {
     }
   }, [token]);
 
-  // 3-second auto-refresh polling hook
-  useEffect(() => {
-    let interval: any = null;
-    if (token) {
-      interval = setInterval(() => {
-        fetchSystemStatus();
-        fetchChannelAnalytics(false);
-        fetchNewsHistory();
-        fetchVideoHistory();
-        fetchJobsHistory();
-      }, 3000);
-    }
-    return () => clearInterval(interval);
-  }, [token, analyticsFilter]);
-
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-
-  const scrollChart = (direction: 'left' | 'right') => {
-    if (chartContainerRef.current) {
-      const scrollAmount = 300;
-      chartContainerRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      });
-    }
-  };
-
   // Refresh keys list on Settings tab activation
   useEffect(() => {
     if (activeTab === 'settings' && token) {
@@ -291,17 +259,16 @@ function App() {
     }
   };
 
-  const fetchChannelAnalytics = async (refresh = false, filter?: string) => {
+  const fetchChannelAnalytics = async (refresh = false) => {
     try {
       if (refresh) setIsRefreshingAnalytics(true);
-      const filterParam = filter || analyticsFilter;
-      // Channel metrics cache check with filter
-      const res = await fetch(`${API_BASE}/api/analytics/channel?refresh=${refresh}&filter=${filterParam}`);
+      // Channel metrics cache check
+      const res = await fetch(`${API_BASE}/api/analytics/channel?refresh=${refresh}`);
       const data = await res.json();
       setChannelMetrics(data);
 
-      // Video analytics list with filter
-      const vRes = await fetch(`${API_BASE}/api/analytics/videos?filter=${filterParam}`);
+      // Video analytics list
+      const vRes = await fetch(`${API_BASE}/api/analytics/videos`);
       const vData = await vRes.json();
       if (Array.isArray(vData)) {
         setVideoAnalytics(vData);
@@ -310,84 +277,6 @@ function App() {
       console.error(err);
     } finally {
       if (refresh) setIsRefreshingAnalytics(false);
-    }
-  };
-
-  const handleDeleteJob = async (jobId: string) => {
-    if (!window.confirm('Are you sure you want to permanently delete this job and all associated records? This cannot be undone.')) return;
-    setDeletingJobId(jobId);
-    try {
-      const res = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        fetchJobsHistory();
-        fetchVideoHistory();
-        if (selectedJob?.id === jobId) setSelectedJob(null);
-      } else {
-        alert(data.detail || 'Failed to delete job.');
-      }
-    } catch (err) {
-      alert('Error deleting job.');
-    } finally {
-      setDeletingJobId(null);
-    }
-  };
-
-  const handleDeleteVideo = async (videoId: string) => {
-    if (!window.confirm('Are you sure you want to permanently delete this video record? This cannot be undone.')) return;
-    setDeletingVideoId(videoId);
-    try {
-      const res = await fetch(`${API_BASE}/api/videos/${videoId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        fetchVideoHistory();
-        fetchChannelAnalytics();
-      } else {
-        alert(data.detail || 'Failed to delete video.');
-      }
-    } catch (err) {
-      alert('Error deleting video.');
-    } finally {
-      setDeletingVideoId(null);
-    }
-  };
-
-  const handleBulkDelete = async (action: string) => {
-    const labels: Record<string, string> = {
-      failed: 'all FAILED jobs',
-      cancelled: 'all CANCELLED jobs',
-      test: 'all TEST jobs',
-      old: 'all jobs older than 30 days',
-      all_finished: 'ALL finished jobs'
-    };
-    if (!window.confirm(`Are you sure you want to permanently delete ${labels[action] || action}? This cannot be undone.`)) return;
-    setBulkDeleteAction(action);
-    setBulkDeleteResult(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/jobs/bulk-delete?action=${action}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setBulkDeleteResult(`Deleted ${data.deleted_count} job(s).`);
-        fetchJobsHistory();
-        fetchVideoHistory();
-        setSelectedJob(null);
-      } else {
-        setBulkDeleteResult(data.detail || 'Bulk delete failed.');
-      }
-    } catch (err) {
-      setBulkDeleteResult('Error performing bulk delete.');
-    } finally {
-      setBulkDeleteAction(null);
-      setTimeout(() => setBulkDeleteResult(null), 4000);
     }
   };
 
@@ -811,72 +700,26 @@ function App() {
               ))}
             </div>
 
-            {/* Analytics Filter Toggle */}
-            <div className="glass-panel p-4 rounded-2xl border border-yellow-500/10 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Filter className="text-finance-accent w-4 h-4" />
-                <span className="text-xs font-bold text-white uppercase tracking-wider">Analytics View:</span>
-              </div>
-              <div className="flex items-center bg-finance-dark/60 p-1 rounded-xl border border-yellow-500/10">
-                {(['public', 'test', 'all'] as const).map(f => (
-                  <button
-                    key={f}
-                    onClick={() => { setAnalyticsFilter(f); fetchChannelAnalytics(false, f); }}
-                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      analyticsFilter === f 
-                        ? 'bg-finance-accent text-finance-dark shadow-md' 
-                        : 'text-finance-textMuted hover:text-white'
-                    }`}
-                  >
-                    {f.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-             {/* Video analytics chart */}
+            {/* Video analytics chart */}
             {videoAnalytics.length > 0 && (
               <div className="glass-panel p-6 rounded-2xl border border-yellow-500/10">
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <TrendingUp className="text-finance-accent w-5 h-5" />
-                    Views Trend - {analyticsFilter === 'public' ? 'Public' : analyticsFilter === 'test' ? 'Test' : 'All'} Shorts
-                  </h3>
-                  {videoAnalytics.length > 1 && (
-                    <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => scrollChart('left')}
-                        className="px-3 py-1.5 bg-finance-dark/80 border border-yellow-500/10 hover:border-yellow-500/30 text-finance-accent rounded-xl text-xs font-bold transition-all active:scale-95 shadow flex items-center gap-1"
-                      >
-                        ◀ Left
-                      </button>
-                      <button 
-                        onClick={() => scrollChart('right')}
-                        className="px-3 py-1.5 bg-finance-dark/80 border border-yellow-500/10 hover:border-yellow-500/30 text-finance-accent rounded-xl text-xs font-bold transition-all active:scale-95 shadow flex items-center gap-1"
-                      >
-                        Right ▶
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div 
-                  ref={chartContainerRef}
-                  className="h-80 overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent scroll-smooth"
-                >
-                  <div style={{ width: Math.max(videoAnalytics.length * 120, 800), height: '100%', minWidth: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={videoAnalytics.slice().reverse()}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(241, 196, 15, 0.05)" />
-                        <XAxis dataKey="title" tickFormatter={(t: string) => t.split(' | ')[0].slice(0, 15) + '...'} stroke="#8892b0" fontSize={11} />
-                        <YAxis stroke="#8892b0" fontSize={11} />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', color: '#0f172a', borderRadius: '12px' }}
-                          labelFormatter={(t: any) => String(t)}
-                        />
-                        <Bar dataKey="views" fill="#d97706" radius={[6, 6, 0, 0]} barSize={40} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <TrendingUp className="text-finance-accent w-5 h-5" />
+                  Views Trend - Recent Shorts
+                </h3>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={videoAnalytics.slice().reverse()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(241, 196, 15, 0.05)" />
+                      <XAxis dataKey="title" tickFormatter={(t) => t.split(' | ')[0].slice(0, 15) + '...'} stroke="#8892b0" fontSize={11} />
+                      <YAxis stroke="#8892b0" fontSize={11} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', color: '#0f172a', borderRadius: '12px' }}
+                        labelFormatter={(t) => t}
+                      />
+                      <Bar dataKey="views" fill="#d97706" radius={[6, 6, 0, 0]} barSize={40} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             )}
@@ -1082,9 +925,7 @@ function App() {
                       <th className="py-4 px-6">Published Date</th>
                       <th className="py-4 px-6 text-center">Duration</th>
                       <th className="py-4 px-6">YouTube URL</th>
-                      <th className="py-4 px-6 text-center">Type</th>
                       <th className="py-4 px-6 text-center">Status</th>
-                      <th className="py-4 px-6 text-center">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-yellow-500/5 text-sm">
@@ -1115,15 +956,6 @@ function App() {
                           )}
                         </td>
                         <td className="py-4 px-6 text-center">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            video.is_test 
-                              ? 'bg-yellow-950/40 text-finance-accent border border-yellow-500/20'
-                              : 'bg-green-950/40 text-finance-success border border-green-500/20'
-                          }`}>
-                            {video.is_test ? 'TEST' : 'PUBLIC'}
-                          </span>
-                        </td>
-                        <td className="py-4 px-6 text-center">
                           <span className={`text-xs font-bold px-2 py-1 rounded ${
                             video.status === 'uploaded' ? 'bg-green-950/40 text-finance-success border border-green-500/20' : 
                             video.status === 'test' ? 'bg-yellow-950/40 text-finance-accent border border-yellow-500/20' : 
@@ -1132,21 +964,11 @@ function App() {
                             {video.status.toUpperCase()}
                           </span>
                         </td>
-                        <td className="py-4 px-6 text-center">
-                          <button
-                            onClick={() => handleDeleteVideo(video.id)}
-                            disabled={deletingVideoId === video.id}
-                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-950/20 rounded-lg transition-all"
-                            title="Delete video record"
-                          >
-                            <Trash2 className={`w-4 h-4 ${deletingVideoId === video.id ? 'animate-spin' : ''}`} />
-                          </button>
-                        </td>
                       </tr>
                     ))}
                     {videoHistory.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="text-center py-12 text-finance-textMuted">No published videos found in history.</td>
+                        <td colSpan={5} className="text-center py-12 text-finance-textMuted">No published videos found in history.</td>
                       </tr>
                     )}
                   </tbody>
@@ -1234,37 +1056,9 @@ function App() {
 
         {activeTab === 'jobs' && (
           <div className="space-y-8">
-            <div className="flex justify-between items-start">
-              <div>
-                <h1 className="text-3xl font-extrabold text-white">Jobs Console</h1>
-                <p className="text-sm text-finance-textMuted mt-1">Monitor real-time logs, pipeline stages, and execution trace paths.</p>
-              </div>
-            </div>
-
-            {/* Bulk Cleanup Bar */}
-            <div className="glass-panel p-4 rounded-2xl border border-yellow-500/10 flex flex-wrap items-center gap-3">
-              <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                <Trash2 className="w-3.5 h-3.5 text-finance-accent" />
-                Bulk Cleanup:
-              </span>
-              {[
-                { action: 'failed', label: 'Delete Failed', color: 'hover:bg-red-950/30 hover:text-red-400 hover:border-red-500/20' },
-                { action: 'cancelled', label: 'Delete Cancelled', color: 'hover:bg-orange-950/30 hover:text-orange-400 hover:border-orange-500/20' },
-                { action: 'test', label: 'Delete Test', color: 'hover:bg-yellow-950/30 hover:text-finance-accent hover:border-yellow-500/20' },
-                { action: 'old', label: 'Delete Old (30d+)', color: 'hover:bg-zinc-800/40 hover:text-zinc-300 hover:border-zinc-600/20' },
-              ].map(btn => (
-                <button
-                  key={btn.action}
-                  onClick={() => handleBulkDelete(btn.action)}
-                  disabled={bulkDeleteAction !== null}
-                  className={`px-3 py-1.5 text-[10px] font-bold rounded-lg border border-zinc-800/40 text-zinc-400 bg-zinc-900/30 transition-all ${btn.color} ${bulkDeleteAction === btn.action ? 'animate-pulse' : ''}`}
-                >
-                  {bulkDeleteAction === btn.action ? 'Deleting...' : btn.label}
-                </button>
-              ))}
-              {bulkDeleteResult && (
-                <span className="text-xs text-finance-success font-semibold ml-auto">{bulkDeleteResult}</span>
-              )}
+            <div>
+              <h1 className="text-3xl font-extrabold text-white">Jobs Console</h1>
+              <p className="text-sm text-finance-textMuted mt-1">Monitor real-time logs, pipeline stages, and execution trace paths.</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1273,55 +1067,34 @@ function App() {
                 <h3 className="font-bold text-white text-base border-b border-yellow-500/10 pb-3">Pipeline Jobs</h3>
                 <div className="space-y-3">
                   {jobsHistory.map((job) => (
-                    <div
+                    <button
                       key={job.id}
-                      className={`relative p-3.5 rounded-xl border transition-all ${
+                      onClick={() => {
+                        setSelectedJob(job);
+                        if (job.status === 'RUNNING') {
+                          setPollingJobId(job.id);
+                        } else {
+                          setPollingJobId(null);
+                        }
+                      }}
+                      className={`w-full text-left p-3.5 rounded-xl border transition-all ${
                         selectedJob?.id === job.id 
                           ? 'bg-finance-accent/15 border-finance-accent' 
                           : 'bg-finance-dark/45 border-yellow-500/5 hover:border-yellow-500/15'
                       }`}
                     >
-                      <button
-                        onClick={() => {
-                          setSelectedJob(job);
-                          if (job.status === 'RUNNING') {
-                            setPollingJobId(job.id);
-                          } else {
-                            setPollingJobId(null);
-                          }
-                        }}
-                        className="w-full text-left"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white text-xs tracking-wider uppercase">Job: {job.job_date}</span>
-                            {job.is_test && (
-                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-yellow-950/50 text-finance-accent border border-yellow-500/20">TEST</span>
-                            )}
-                          </div>
-                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                            job.status === 'COMPLETED' ? 'bg-finance-success/15 text-finance-success border border-finance-success/25' :
-                            job.status === 'FAILED' ? 'bg-finance-danger/15 text-finance-danger border border-finance-danger/25' :
-                            job.status === 'CANCELLED' ? 'bg-orange-500/15 text-orange-400 border border-orange-500/25' :
-                            job.status === 'SKIPPED' ? 'bg-zinc-100 text-zinc-600 border border-zinc-200' : 'bg-finance-accent/15 text-finance-accent border border-finance-accent/25 animate-pulse'
-                          }`}>
-                            {job.status}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-finance-textMuted mt-2">Started: {new Date(job.started_at).toLocaleTimeString()}</p>
-                      </button>
-                      {/* Delete button - only for non-running jobs */}
-                      {['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(job.status) && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDeleteJob(job.id); }}
-                          disabled={deletingJobId === job.id}
-                          className="absolute top-3 right-3 p-1 text-zinc-600 hover:text-red-400 hover:bg-red-950/20 rounded-lg transition-all z-10"
-                          title="Delete this job"
-                        >
-                          <Trash2 className={`w-3.5 h-3.5 ${deletingJobId === job.id ? 'animate-spin' : ''}`} />
-                        </button>
-                      )}
-                    </div>
+                      <div className="flex justify-between items-start">
+                        <span className="font-bold text-white text-xs tracking-wider uppercase">Job: {job.job_date}</span>
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                          job.status === 'COMPLETED' ? 'bg-finance-success/15 text-finance-success border border-finance-success/25' :
+                          job.status === 'FAILED' ? 'bg-finance-danger/15 text-finance-danger border border-finance-danger/25' :
+                          job.status === 'SKIPPED' ? 'bg-zinc-100 text-zinc-600 border border-zinc-200' : 'bg-finance-accent/15 text-finance-accent border border-finance-accent/25 animate-pulse'
+                        }`}>
+                          {job.status}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-finance-textMuted mt-2">Started: {new Date(job.started_at).toLocaleTimeString()}</p>
+                    </button>
                   ))}
                   {jobsHistory.length === 0 && (
                     <div className="text-center py-12 text-finance-textMuted text-sm">No job records found.</div>
@@ -1339,7 +1112,7 @@ function App() {
                           <h3 className="font-bold text-white text-base">Execution Details: {selectedJob.job_date}</h3>
                           <p className="text-xs text-finance-textMuted mt-0.5">Stage: <span className="text-white font-semibold">{selectedJob.current_stage}</span></p>
                         </div>
-                        {!['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(selectedJob.status) ? (
+                        {!['COMPLETED', 'FAILED', 'SKIPPED'].includes(selectedJob.status) ? (
                           <div className="flex items-center gap-3">
                             <div className="flex items-center gap-1.5 text-xs text-finance-accent animate-pulse font-bold">
                               <RefreshCw className="w-4 h-4 animate-spin text-finance-accent" />
@@ -1429,37 +1202,16 @@ function App() {
                               name: "Script Design",
                               description: "Structuring hooks, details & tags",
                               icon: <FileText className="w-4 h-4" />,
-                              ...getStageInfo("SCRIPTING")
+                              ...getStageInfo("SCRIPT_GENERATING")
                             })}
-                            {/* Node 5: Audio Generation */}
-                            {renderWorkflowNode({
-                              name: "Audio Generation",
-                              description: "TTS narration with word-level timestamps",
-                              icon: <Activity className="w-4 h-4" />,
-                              ...getStageInfo("GENERATING_AUDIO")
-                            })}
-                            {/* Node 6: Visual Generation */}
-                            {renderWorkflowNode({
-                              name: "Visual Generation",
-                              description: "Creating financial charts & data cards",
-                              icon: <Sparkles className="w-4 h-4" />,
-                              ...getStageInfo("GENERATING_VISUALS")
-                            })}
-                            {/* Node 7: Video Rendering */}
+                            {/* Node 5: Video Render */}
                             {renderWorkflowNode({
                               name: "Video Compositing (FFmpeg)",
-                              description: "Multi-card overlays & subtitle burning",
+                              description: "Voice synthesis, overlays & compositing",
                               icon: <Video className="w-4 h-4" />,
-                              ...getStageInfo("RENDERING")
+                              ...getStageInfo("VISUAL_GENERATING")
                             })}
-                            {/* Node 8: Quality Validation */}
-                            {renderWorkflowNode({
-                              name: "Quality Validation",
-                              description: "Duration, size & format checks",
-                              icon: <Award className="w-4 h-4" />,
-                              ...getStageInfo("VALIDATING")
-                            })}
-                            {/* Node 9: YouTube Upload */}
+                            {/* Node 6: YouTube Upload */}
                             {renderWorkflowNode({
                               name: "YouTube Publish",
                               description: selectedJob.is_test ? "Upload as Private/Unlisted" : "Upload as Public Video",
@@ -1470,7 +1222,7 @@ function App() {
 
                           {/* Error Card for Workflow */}
                           {(() => {
-                            const failedStage = ['FETCHING_NEWS', 'ANALYZING', 'SCRIPTING', 'GENERATING_AUDIO', 'GENERATING_VISUALS', 'RENDERING', 'VALIDATING', 'UPLOADING']
+                            const failedStage = ['FETCHING_NEWS', 'ANALYZING', 'SCRIPT_GENERATING', 'VISUAL_GENERATING', 'UPLOADING']
                               .map(stage => ({ stage, ...getStageInfo(stage) }))
                               .find(info => info.status === 'FAILED');
                             if (!failedStage) return null;
