@@ -35,35 +35,71 @@ function App() {
   const [bulkDeleteAction, setBulkDeleteAction] = useState<string | null>(null);
   const [bulkDeleteResult, setBulkDeleteResult] = useState<string | null>(null);
 
+  const STAGES_SEQUENCE = [
+    'FETCHING_NEWS', 
+    'ANALYZING', 
+    'SCRIPTING', 
+    'GENERATING_AUDIO', 
+    'GENERATING_VISUALS', 
+    'RENDERING', 
+    'VALIDATING', 
+    'UPLOADING'
+  ];
+
   const getStageInfo = (stageName: string) => {
     if (!selectedJob || !selectedJob.logs) return { status: 'PENDING', duration: 0, error: null };
     
+    const stageIdx = STAGES_SEQUENCE.indexOf(stageName);
     const stageLogs = selectedJob.logs.filter((l: any) => l.stage === stageName);
-    if (stageLogs.length === 0) {
-      if (['COMPLETED', 'FAILED', 'SKIPPED'].includes(selectedJob.status)) {
-        return { status: 'SKIPPED', duration: 0, error: null };
-      }
-      return { status: 'PENDING', duration: 0, error: null };
-    }
     
     const successLog = stageLogs.find((l: any) => l.status === 'SUCCESS');
     const failedLog = stageLogs.find((l: any) => l.status === 'FAILED');
-    const warningLog = stageLogs.find((l: any) => l.status === 'WARNING');
-    const infoLog = stageLogs.find((l: any) => l.status === 'INFO');
-    
+    const warningLog = stageLogs.find((l: any) => l.status === 'WARNING' || l.status === 'SKIPPED');
+    const isJobFinished = ['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(selectedJob.status);
+
     if (successLog) {
-      return { status: 'SUCCESS', duration: successLog.duration, error: null };
+      return { status: 'SUCCESS', duration: successLog.duration || 0, error: null };
     }
     if (failedLog) {
-      return { status: 'FAILED', duration: failedLog.duration, error: failedLog.error || failedLog.message };
+      return { status: 'FAILED', duration: failedLog.duration || 0, error: failedLog.error || failedLog.message };
     }
     if (warningLog) {
-      return { status: 'SKIPPED', duration: warningLog.duration, error: null };
+      return { status: 'SKIPPED', duration: warningLog.duration || 0, error: null };
     }
-    if (infoLog) {
+
+    // Check if any stage that comes after this one in the pipeline has already logged
+    const laterStagesHaveLogs = selectedJob.logs.some((l: any) => {
+      const idx = STAGES_SEQUENCE.indexOf(l.stage);
+      return idx > stageIdx;
+    });
+
+    if (stageLogs.length > 0) {
+      // If later stages ran or the entire job is COMPLETED, this stage succeeded
+      if (laterStagesHaveLogs || selectedJob.status === 'COMPLETED') {
+        return { status: 'SUCCESS', duration: 0, error: null };
+      }
+      
+      // If the job failed or was cancelled, a stage cannot still be "RUNNING"
+      if (isJobFinished) {
+        if (selectedJob.status === 'FAILED') {
+          return { status: 'FAILED', duration: 0, error: selectedJob.error_message || "Stage failed" };
+        }
+        return { status: 'SKIPPED', duration: 0, error: null };
+      }
+
+      // Active job currently running this stage
       return { status: 'RUNNING', duration: 0, error: null };
     }
-    
+
+    // No logs yet for this stage
+    if (isJobFinished) {
+      return { status: 'SKIPPED', duration: 0, error: null };
+    }
+
+    if (selectedJob.current_stage === stageName || selectedJob.status === stageName) {
+      return { status: 'RUNNING', duration: 0, error: null };
+    }
+
     return { status: 'PENDING', duration: 0, error: null };
   };
 
@@ -86,10 +122,10 @@ function App() {
       badgeText = "Completed";
       badgeClass = "text-finance-success bg-finance-success/10 border-finance-success/25";
     } else if (node.status === "RUNNING") {
-      statusClass = "border-yellow-500/25 bg-yellow-500/[0.01] animate-pulse";
-      iconBg = "bg-zinc-950 border-yellow-500/60 text-finance-accent animate-spin";
+      statusClass = "border-yellow-500/40 bg-yellow-500/[0.03] shadow-sm shadow-yellow-500/5";
+      iconBg = "bg-zinc-950 border-yellow-500 text-finance-accent ring-2 ring-yellow-500/20";
       badgeText = "Running";
-      badgeClass = "text-finance-accent bg-yellow-500/10 border-yellow-500/25";
+      badgeClass = "text-finance-accent bg-yellow-500/15 border-yellow-500/30";
     } else if (node.status === "FAILED") {
       statusClass = "border-finance-danger/20 bg-finance-danger/[0.02] shadow-md shadow-finance-danger/5";
       iconBg = "bg-zinc-950 border-finance-danger/40 text-finance-danger";
@@ -103,22 +139,25 @@ function App() {
     }
     
     return (
-      <div className="flex gap-4 items-start relative z-10">
-        <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center shrink-0 shadow-lg ${iconBg}`}>
+      <div className="flex gap-4 items-start relative z-10 transition-colors duration-200">
+        <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center shrink-0 shadow-lg transition-colors duration-200 ${iconBg}`}>
           {node.icon}
         </div>
-        <div className={`flex-1 border rounded-xl p-3.5 flex justify-between items-center bg-zinc-950/40 backdrop-blur-sm transition-all duration-300 hover:border-zinc-700/30 ${statusClass}`}>
+        <div className={`flex-1 border rounded-xl p-3.5 flex justify-between items-center bg-zinc-950/40 backdrop-blur-sm transition-all duration-200 hover:border-zinc-700/30 ${statusClass}`}>
           <div>
             <h4 className="font-bold text-white text-xs leading-normal">{node.name}</h4>
             <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal">{node.description}</p>
           </div>
           <div className="flex items-center gap-3">
             {node.duration && node.duration > 0 ? (
-              <span className="text-[10px] text-zinc-500 font-mono">
+              <span className="text-[10px] text-zinc-400 font-mono">
                 {node.duration.toFixed(1)}s
               </span>
             ) : null}
-            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase ${badgeClass}`}>
+            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase flex items-center gap-1.5 ${badgeClass}`}>
+              {node.status === 'RUNNING' && (
+                <span className="w-1.5 h-1.5 rounded-full bg-finance-accent animate-ping" />
+              )}
               {badgeText}
             </span>
           </div>
@@ -415,6 +454,27 @@ function App() {
     }
   };
 
+  const selectJobById = async (job: any) => {
+    setSelectedJob(prev => prev?.id === job.id && prev.logs ? { ...job, logs: prev.logs } : job);
+    if (job.status === 'RUNNING' || !['COMPLETED', 'FAILED', 'SKIPPED'].includes(job.status)) {
+      setPollingJobId(job.id);
+    } else {
+      setPollingJobId(null);
+    }
+    // Fetch full job details including logs so they never disappear
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${job.id}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (res.ok) {
+        const fullJob = await res.json();
+        setSelectedJob(fullJob);
+      }
+    } catch (err) {
+      console.error("Failed to fetch full job details:", err);
+    }
+  };
+
   const fetchJobsHistory = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/jobs`, {
@@ -427,7 +487,13 @@ function App() {
         const running = data.find(j => j.status === 'RUNNING' || !['COMPLETED', 'FAILED', 'SKIPPED'].includes(j.status));
         if (running) {
           setPollingJobId(running.id);
-          setSelectedJob(running);
+          // Only update selectedJob metadata; DO NOT wipe out existing logs!
+          setSelectedJob(prev => {
+            if (prev?.id === running.id) {
+              return { ...running, logs: prev.logs || [], youtube_url: prev.youtube_url || running.youtube_url };
+            }
+            return prev || running;
+          });
         }
       }
     } catch (err) {
@@ -1281,46 +1347,41 @@ function App() {
                           : 'bg-finance-dark/45 border-yellow-500/5 hover:border-yellow-500/15'
                       }`}
                     >
-                      <button
-                        onClick={() => {
-                          setSelectedJob(job);
-                          if (job.status === 'RUNNING') {
-                            setPollingJobId(job.id);
-                          } else {
-                            setPollingJobId(null);
-                          }
-                        }}
-                        className="w-full text-left"
+                      <div
+                        onClick={() => selectJobById(job)}
+                        className="cursor-pointer"
                       >
-                        <div className="flex justify-between items-start">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white text-xs tracking-wider uppercase">Job: {job.job_date}</span>
+                        <div className="flex justify-between items-center gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-bold text-white text-xs tracking-wider uppercase truncate">Job: {job.job_date}</span>
                             {job.is_test && (
-                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-yellow-950/50 text-finance-accent border border-yellow-500/20">TEST</span>
+                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-yellow-950/50 text-finance-accent border border-yellow-500/20 flex-shrink-0">TEST</span>
                             )}
                           </div>
-                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                            job.status === 'COMPLETED' ? 'bg-finance-success/15 text-finance-success border border-finance-success/25' :
-                            job.status === 'FAILED' ? 'bg-finance-danger/15 text-finance-danger border border-finance-danger/25' :
-                            job.status === 'CANCELLED' ? 'bg-orange-500/15 text-orange-400 border border-orange-500/25' :
-                            job.status === 'SKIPPED' ? 'bg-zinc-100 text-zinc-600 border border-zinc-200' : 'bg-finance-accent/15 text-finance-accent border border-finance-accent/25 animate-pulse'
-                          }`}>
-                            {job.status}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                              job.status === 'COMPLETED' ? 'bg-finance-success/15 text-finance-success border border-finance-success/25' :
+                              job.status === 'FAILED' ? 'bg-finance-danger/15 text-finance-danger border border-finance-danger/25' :
+                              job.status === 'CANCELLED' ? 'bg-orange-500/15 text-orange-400 border border-orange-500/25' :
+                              job.status === 'SKIPPED' ? 'bg-zinc-100 text-zinc-600 border border-zinc-200' : 'bg-finance-accent/15 text-finance-accent border border-finance-accent/25 animate-pulse'
+                            }`}>
+                              {job.status}
+                            </span>
+                            {/* Delete button - placed side-by-side with badge to avoid any overlap */}
+                            {['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(job.status) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDeleteJob(job.id); }}
+                                disabled={deletingJobId === job.id}
+                                className="p-1 text-zinc-400 hover:text-red-400 hover:bg-red-950/30 rounded-md transition-all ml-0.5"
+                                title="Delete this job"
+                              >
+                                <Trash2 className={`w-3.5 h-3.5 ${deletingJobId === job.id ? 'animate-spin' : ''}`} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-[10px] text-finance-textMuted mt-2">Started: {new Date(job.started_at).toLocaleTimeString()}</p>
-                      </button>
-                      {/* Delete button - only for non-running jobs */}
-                      {['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(job.status) && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDeleteJob(job.id); }}
-                          disabled={deletingJobId === job.id}
-                          className="absolute top-3 right-3 p-1 text-zinc-600 hover:text-red-400 hover:bg-red-950/20 rounded-lg transition-all z-10"
-                          title="Delete this job"
-                        >
-                          <Trash2 className={`w-3.5 h-3.5 ${deletingJobId === job.id ? 'animate-spin' : ''}`} />
-                        </button>
-                      )}
+                        <p className="text-[10px] text-finance-textMuted mt-1.5">Started: {new Date(job.started_at).toLocaleTimeString()}</p>
+                      </div>
                     </div>
                   ))}
                   {jobsHistory.length === 0 && (

@@ -1,7 +1,12 @@
 import os
+import os
+import re
 import re
 import json
+import json
 import secrets
+import secrets
+from cryptography.fernet import Fernet
 from cryptography.fernet import Fernet
 
 def parse_credentials(file_path):
@@ -42,17 +47,18 @@ def parse_credentials(file_path):
     return data
 
 def main():
-    cred_file = "D:/youtube_news/credentials.txt"
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    cred_file = os.path.join(base_dir, "credentials.txt")
     if not os.path.exists(cred_file):
         print(f"Credentials file not found at {cred_file}")
         return
 
-    print("Parsing credentials.txt...")
+    print(f"Parsing {cred_file}...")
     creds = parse_credentials(cred_file)
     
     # Generate Encryption Key and Admin Password
     encryption_key = Fernet.generate_key().decode()
-    admin_password = secrets.token_urlsafe(12)
+    admin_password = creds.get('ADMIN_PASSWORD', 'admin123')
     
     # Parse Supabase URL (strip rest/v1/ if present so supabase-py client likes it)
     supabase_url = creds.get('SUPABASE_URL', '')
@@ -93,9 +99,10 @@ def main():
     ]
 
     # Save to .env
-    with open("D:/youtube_news/.env", "w", encoding="utf-8") as f:
+    env_file = os.path.join(base_dir, ".env")
+    with open(env_file, "w", encoding="utf-8") as f:
         f.write("\n".join(env_lines))
-    print("Created D:/youtube_news/.env successfully!")
+    print(f"Created {env_file} successfully!")
     print(f"Admin Credentials: Username: admin | Password: {admin_password}")
 
     # Create .gitignore
@@ -153,17 +160,17 @@ media/rendered/*
 !media/charts/.gitkeep
 !media/rendered/.gitkeep
 """
-    with open("D:/youtube_news/.gitignore", "w", encoding="utf-8") as f:
+    with open(os.path.join(base_dir, ".gitignore"), "w", encoding="utf-8") as f:
         f.write(gitignore_content)
-    print("Created D:/youtube_news/.gitignore successfully!")
+    print("Created .gitignore successfully!")
 
     # Create media folder structures and .gitkeep files
     media_dirs = [
-        "D:/youtube_news/media/temp",
-        "D:/youtube_news/media/audio",
-        "D:/youtube_news/media/images",
-        "D:/youtube_news/media/charts",
-        "D:/youtube_news/media/rendered",
+        os.path.join(base_dir, "media", "temp"),
+        os.path.join(base_dir, "media", "audio"),
+        os.path.join(base_dir, "media", "images"),
+        os.path.join(base_dir, "media", "charts"),
+        os.path.join(base_dir, "media", "rendered"),
     ]
     for d in media_dirs:
         os.makedirs(d, exist_ok=True)

@@ -330,39 +330,32 @@ class JobManager:
             self.log_stage(supabase, job_id, "SCRIPTING", "SUCCESS", f"Generated Short script. Title: '{script_data.title}'", duration=s3_dur)
 
             check_cancellation()
-            # --- STAGE 4: GENERATING AUDIO ---
-            self.update_job_progress(supabase, job_id, "GENERATING_AUDIO", 45, "Synthesizing TTS narration")
-            self.log_stage(supabase, job_id, "GENERATING_AUDIO", "INFO", "Starting audio generation...")
-            s4_start = time.time()
-            
+            # --- STAGES 4, 5, 6: AUDIO, VISUALS & RENDERING ---
             script_dict = {
                 "script": script_data.script,
                 "title": script_data.title,
                 "company": winner_evaluation.company,
                 "sector": winner_evaluation.sector
             }
-            
-            check_cancellation()
-            # --- STAGE 5: GENERATING VISUALS ---
-            self.update_job_progress(supabase, job_id, "GENERATING_VISUALS", 55, "Creating financial graphics and charts")
-            self.log_stage(supabase, job_id, "GENERATING_VISUALS", "INFO", "Generating dynamic visual cards from news data...")
-            
-            check_cancellation()
-            # --- STAGE 6: RENDERING ---
-            self.update_job_progress(supabase, job_id, "RENDERING", 65, "Rendering final video with FFmpeg")
-            self.log_stage(supabase, job_id, "RENDERING", "INFO", "Compositing video layers and burning captions...")
-            
+
+            def on_media_stage(stage: str, status: str, message: str, duration: float = 0.0):
+                progress_weights = {
+                    "GENERATING_AUDIO": 45,
+                    "GENERATING_VISUALS": 60,
+                    "RENDERING": 75
+                }
+                if status == "INFO":
+                    self.update_job_progress(supabase, job_id, stage, progress_weights.get(stage, 50), message)
+                self.log_stage(supabase, job_id, stage, status, message, duration=duration)
+
             loop2 = asyncio.new_event_loop()
             asyncio.set_event_loop(loop2)
             try:
                 rendered_video_path = loop2.run_until_complete(
-                    self.media.generate_video(winner_article, script_dict, job_id)
+                    self.media.generate_video(winner_article, script_dict, job_id, stage_callback=on_media_stage)
                 )
             finally:
                 loop2.close()
-                
-            s4_dur = time.time() - s4_start
-            self.log_stage(supabase, job_id, "RENDERING", "SUCCESS", f"Assembled 1080x1920 Short video at {rendered_video_path}", duration=s4_dur)
 
             check_cancellation()
             # --- STAGE 7: QUALITY CHECK / VALIDATING ---
@@ -389,39 +382,67 @@ class JobManager:
             title_prefix = "[TEST] " if is_test else ""
             status_str = "test" if is_test else "uploaded"
             
-            self.update_job_progress(supabase, job_id, "UPLOADING", 90, f"Uploading Short to YouTube ({privacy.capitalize()})")
-            s6_start = time.time()
-            
-            upload_res = self.youtube.upload_short(
-                video_path=rendered_video_path,
-                title=f"{title_prefix}{script_data.title}",
-                description=f"{script_data.description}\n\nSources:\n- {winner_article.get('source')}\n\nDisclaimer: {script_data.disclaimer}",
-                tags=script_data.hashtags,
-                privacy_status=privacy
-            )
-            
-            supabase.table("videos").insert({
-                "job_id": job_id,
-                "title": f"{title_prefix}{script_data.title}",
-                "description": script_data.description,
-                "youtube_video_id": upload_res["video_id"],
-                "youtube_url": upload_res["youtube_url"],
-                "duration": int(v_duration),
-                "source_urls": [winner_article["url"]],
-                "status": status_str,
-                "is_test": is_test
-            }).execute()
+            # Check if auto_upload is enabled in database settings
+            auto_upload_enabled = True
+            try:
+                res_settings = supabase.table("settings").select("value").eq("key", "auto_upload").execute()
+                if res_settings.data and str(res_settings.data[0].get("value", "")).lower() == "false":
+                    auto_upload_enabled = False
+            except Exception:
+                pass
 
-            s6_dur = time.time() - s6_start
-            self.log_stage(supabase, job_id, "UPLOADING", "SUCCESS", f"Uploaded successfully to YouTube ({privacy}): {upload_res['youtube_url']}", duration=s6_dur)
+            has_yt_creds = bool(self.youtube.client_id and self.youtube.client_secret and self.youtube.refresh_token)
 
-            # Clean up rendered video post-upload
-            if os.path.exists(rendered_video_path):
-                try:
-                    os.remove(rendered_video_path)
-                    print("JobManager: Temporary rendered video deleted successfully.")
-                except Exception as del_err:
-                    print(f"JobManager: Failed to delete final video file: {del_err}")
+            if auto_upload_enabled and has_yt_creds:
+                self.update_job_progress(supabase, job_id, "UPLOADING", 90, f"Uploading Short to YouTube ({privacy.capitalize()})")
+                s6_start = time.time()
+                
+                upload_res = self.youtube.upload_short(
+                    video_path=rendered_video_path,
+                    title=f"{title_prefix}{script_data.title}",
+                    description=f"{script_data.description}\n\nSources:\n- {winner_article.get('source')}\n\nDisclaimer: {script_data.disclaimer}",
+                    tags=script_data.hashtags,
+                    privacy_status=privacy
+                )
+                
+                supabase.table("videos").insert({
+                    "job_id": job_id,
+                    "title": f"{title_prefix}{script_data.title}",
+                    "description": script_data.description,
+                    "youtube_video_id": upload_res["video_id"],
+                    "youtube_url": upload_res["youtube_url"],
+                    "duration": int(v_duration),
+                    "source_urls": [winner_article["url"]],
+                    "status": status_str,
+                    "is_test": is_test
+                }).execute()
+
+                s6_dur = time.time() - s6_start
+                self.log_stage(supabase, job_id, "UPLOADING", "SUCCESS", f"Uploaded successfully to YouTube ({privacy}): {upload_res['youtube_url']}", duration=s6_dur)
+
+                # Clean up rendered video post-upload
+                if os.path.exists(rendered_video_path):
+                    try:
+                        os.remove(rendered_video_path)
+                        print("JobManager: Temporary rendered video deleted successfully.")
+                    except Exception as del_err:
+                        print(f"JobManager: Failed to delete final video file: {del_err}")
+            else:
+                reason = "Auto-upload disabled in settings" if not auto_upload_enabled else "YouTube OAuth credentials not configured"
+                print(f"JobManager: Skipping YouTube upload ({reason}). Video preserved at {rendered_video_path}.")
+                self.log_stage(supabase, job_id, "UPLOADING", "SKIPPED", f"YouTube upload skipped ({reason}). Video saved locally.", duration=0.1)
+
+                supabase.table("videos").insert({
+                    "job_id": job_id,
+                    "title": f"{title_prefix}{script_data.title}",
+                    "description": script_data.description,
+                    "youtube_video_id": "local",
+                    "youtube_url": f"/api/jobs/{job_id}/video",
+                    "duration": int(v_duration),
+                    "source_urls": [winner_article["url"]],
+                    "status": "test" if is_test else "local",
+                    "is_test": is_test
+                }).execute()
 
             # Complete Job
             total_dur = time.time() - start_time

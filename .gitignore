@@ -5,9 +5,17 @@ credentials.txt
 *.json
 !package.json
 !tsconfig.json
+!frontend/tsconfig*.json
 !composer.json
 !vercel.json
 !render.yaml
+
+# Local Database
+*.db
+factory.db
+
+# USB Standalone Package Directory
+StockShorts_USB_Ready/
 
 # OS files
 Thumbs.db
@@ -51,11 +59,3 @@ media/rendered/*
 !media/images/.gitkeep
 !media/charts/.gitkeep
 !media/rendered/.gitkeep
-
-# Local Database
-*.db
-factory.db
-
-# Installers / Large Binaries
-*.exe
-OllamaSetup.exe

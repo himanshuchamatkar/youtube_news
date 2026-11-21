@@ -69,7 +69,7 @@ class MediaService:
             
         return paths
 
-    async def generate_video(self, article: Dict[str, Any], script_data: Dict[str, Any], job_id: str) -> str:
+    async def generate_video(self, article: Dict[str, Any], script_data: Dict[str, Any], job_id: str, stage_callback: Any = None) -> str:
         """
         Full video generation pipeline:
         1. Extract financial data from article
@@ -79,6 +79,8 @@ class MediaService:
         5. Fetch/generate background visuals
         6. Compose final video with FFmpeg
         """
+        import time
+
         # Define output file paths
         job_audio_path = os.path.join(self.audio_dir, f"narration_{job_id}.mp3")
         job_srt_path = os.path.join(self.temp_dir, f"subtitles_{job_id}.srt")
@@ -100,6 +102,9 @@ class MediaService:
         # === STEP 2: Generate TTS Audio with Timestamps ===
         script_text = script_data.get("script", "")
         print("MediaService: Generating TTS audio with word-level timestamps...")
+        t_audio_start = time.time()
+        if stage_callback:
+            stage_callback("GENERATING_AUDIO", "INFO", "Synthesizing narration audio with neural voice...")
         
         try:
             audio_path, word_timestamps = await self.tts.generate_narration_with_timestamps(
@@ -121,8 +126,15 @@ class MediaService:
             script_text, duration, job_srt_path,
             word_timestamps=word_timestamps
         )
+        t_audio_dur = time.time() - t_audio_start
+        if stage_callback:
+            stage_callback("GENERATING_AUDIO", "SUCCESS", f"Generated narration ({duration:.1f}s) & sync captions", duration=t_audio_dur)
 
         # === STEP 4: Generate Data-Driven Visual Overlays ===
+        t_vis_start = time.time()
+        if stage_callback:
+            stage_callback("GENERATING_VISUALS", "INFO", "Creating dynamic financial charts and visual cards...")
+
         title = script_data.get("title", article.get("title", ""))
         clean_headline = title.split(" | ")[0]
         company = financial_data.company_name or article.get("company") or script_data.get("company", "N/A")
@@ -202,7 +214,15 @@ class MediaService:
         bg_video_path = os.path.join(self.temp_dir, f"concat_bg_{job_id}.mp4")
         self.ffmpeg.build_concatenated_video(std_clips, bg_video_path)
 
+        t_vis_dur = time.time() - t_vis_start
+        if stage_callback:
+            stage_callback("GENERATING_VISUALS", "SUCCESS", f"Generated financial cards and {len(std_clips)} background clips", duration=t_vis_dur)
+
         # === STEP 8: Final Composition ===
+        t_rend_start = time.time()
+        if stage_callback:
+            stage_callback("RENDERING", "INFO", "Compositing video layers and burning subtitles with FFmpeg...")
+
         try:
             self.ffmpeg.assemble_final_short(
                 bg_video_path=bg_video_path,
@@ -214,6 +234,9 @@ class MediaService:
                 output_path=final_video_path,
                 metric_cards=metric_card_paths
             )
+            t_rend_dur = time.time() - t_rend_start
+            if stage_callback:
+                stage_callback("RENDERING", "SUCCESS", f"Assembled 1080x1920 Short video at {final_video_path}", duration=t_rend_dur)
         finally:
             # === STEP 9: Cleanup Temporary Files ===
             print("MediaService: Cleaning up temporary assets...")

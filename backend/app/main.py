@@ -201,7 +201,12 @@ def list_jobs(limit: int = 20, username: str = Depends(verify_token)):
     try:
         supabase = get_supabase_client()
         res = supabase.table("video_jobs").select("*").order("started_at", desc=True).limit(limit).execute()
-        return res.data
+        jobs = res.data or []
+        # Pre-attach logs to recent jobs for instant visual workflow rendering without delays
+        for job in jobs[:5]:
+            logs_res = supabase.table("job_logs").select("*").eq("job_id", job["id"]).order("timestamp", desc=False).execute()
+            job["logs"] = logs_res.data or []
+        return jobs
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
