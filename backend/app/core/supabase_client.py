@@ -2,8 +2,26 @@ import os
 import json
 import uuid
 import sqlite3
+import socket
+import re
+from urllib.parse import urlparse
 from datetime import date, datetime
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Union
+
+from backend.app.core.config import settings
+
+# Monkeypatch regex in supabase client to allow "sb_" prefixed keys
+try:
+    import supabase._sync.client
+    original_match = re.match
+    def custom_match(pattern, string, flags=0):
+        if 'A-Za-z0-9-_=' in pattern:
+            if string and ('sb_' in string):
+                return True
+        return original_match(pattern, string, flags)
+    supabase._sync.client.re.match = custom_match
+except Exception:
+    pass
 
 # Database path: stored at the root of the workspace
 DB_FILE = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")), "factory.db")
@@ -371,8 +389,31 @@ class SupabaseClientMock:
 
 _client_instance = None
 
-def get_supabase_client() -> SupabaseClientMock:
+def get_supabase_client() -> Any:
     global _client_instance
-    if _client_instance is None:
-        _client_instance = SupabaseClientMock()
+    if _client_instance is not None:
+        return _client_instance
+
+    url = (getattr(settings, "SUPABASE_URL", "") or "").strip().rstrip('/')
+    key = (getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "") or getattr(settings, "SUPABASE_ANON_KEY", "") or "").strip()
+
+    if url and key:
+        try:
+            parsed = urlparse(url)
+            host = parsed.netloc or parsed.path.split('/')[0]
+            # Fast DNS check to verify host exists and internet is available
+            socket.gethostbyname(host)
+            
+            from supabase import create_client
+            cloud_client = create_client(url, key)
+            # Verify connectivity to tables
+            cloud_client.table("settings").select("key").limit(1).execute()
+            print(f"[Database] LIVE: Connected to Cloud Supabase ({host})! Cross-device sync active.")
+            _client_instance = cloud_client
+            return _client_instance
+        except Exception as e:
+            print(f"[Database] NOTICE: Cloud Supabase is not reachable ({e}).")
+            print("[Database] Using local SQLite database (factory.db). To enable cross-device sync, ensure your Supabase project is unpaused at supabase.com.")
+
+    _client_instance = SupabaseClientMock()
     return _client_instance
