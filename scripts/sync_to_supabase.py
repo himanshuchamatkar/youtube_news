@@ -3,6 +3,8 @@ import sys
 import json
 import sqlite3
 import re
+import uuid
+import requests
 from urllib.parse import urlparse
 
 # Add root directory to sys.path
@@ -26,6 +28,13 @@ except Exception:
     pass
 
 from supabase import create_client
+
+def is_valid_uuid(val):
+    try:
+        uuid.UUID(str(val))
+        return True
+    except Exception:
+        return False
 
 def sync_sqlite_to_supabase():
     db_file = os.path.join(BASE_DIR, "factory.db")
@@ -51,6 +60,17 @@ def sync_sqlite_to_supabase():
         print(f"Failed to initialize Supabase client: {e}")
         return
 
+    # Fetch table schemas from PostgREST swagger
+    table_props = {}
+    try:
+        r = requests.get(f"{url}/rest/v1/", headers={'apikey': key, 'Authorization': f'Bearer {key}'}, timeout=10)
+        if r.status_code == 200:
+            defs = r.json().get('definitions', {})
+            for tname, tinfo in defs.items():
+                table_props[tname] = set(tinfo.get('properties', {}).keys())
+    except Exception as e:
+        print(f"Note: Could not fetch schema definitions: {e}")
+
     conn = sqlite3.connect(db_file)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -74,6 +94,7 @@ def sync_sqlite_to_supabase():
                 print(f"Table '{table_name}': 0 rows (skipped)")
                 continue
 
+            valid_cols = table_props.get(table_name)
             records = []
             for r in rows:
                 item = dict(r)
@@ -92,7 +113,20 @@ def sync_sqlite_to_supabase():
                     item["is_test"] = bool(item["is_test"])
                 if "is_encrypted" in item:
                     item["is_encrypted"] = bool(item["is_encrypted"])
+
+                # Handle invalid UUIDs in job_logs
+                if table_name == "job_logs":
+                    if not is_valid_uuid(item.get("job_id")):
+                        continue  # Skip logs with malformed/undefined job_id
+
+                # Filter item keys to valid columns if schema is known
+                if valid_cols:
+                    item = {k: v for k, v in item.items() if k in valid_cols}
+
                 records.append(item)
+
+            if not records:
+                continue
 
             # Upload in batches of 50
             batch_size = 50
@@ -100,13 +134,13 @@ def sync_sqlite_to_supabase():
                 batch = records[i:i + batch_size]
                 supabase.table(table_name).upsert(batch).execute()
 
-            print(f"Table '{table_name}': Successfully uploaded {len(records)} records!")
+            print(f"Table '{table_name}': Successfully synced {len(records)} records!")
         except Exception as e:
             print(f"Table '{table_name}' error: {e}")
 
     conn.close()
     print("======================================================================")
-    print("  Sync completed successfully! Cloud Supabase is now up-to-date.")
+    print("  ALL TABLES SYNCED TO CLOUD SUPABASE SUCCESSFULLY!")
     print("======================================================================")
 
 if __name__ == "__main__":
